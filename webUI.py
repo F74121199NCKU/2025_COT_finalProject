@@ -215,3 +215,91 @@ class Tools:
     def roll_dice(self) -> str:
         """Roll a 6-sided dice."""
         return f"Dice Result: {random.randint(1, 6)}"
+        
+    # --- 7. 查詢MLB選手的數據 ---
+    def get_mlb_stats(self, player_name: str) -> str:
+        """
+        Get current batting stats (AVG, HR, OPS) for an MLB player.
+        Uses the official public MLB Stats API (No Key required).
+        
+        :param player_name: Player's name (English preferred, e.g., "Shohei Ohtani", "Aaron Judge").
+        """
+        try:
+            print(f"[System] Searching MLB stats for '{player_name}'...")
+            
+            # 1. 搜尋球員 ID (Lookup Player)
+            # MLB API 搜尋接口
+            search_url = "https://statsapi.mlb.com/api/v1/people/search"
+            params = {"names": player_name, "active": "true"} # 只找現役球員
+            
+            res = requests.get(search_url, params=params, timeout=5)
+            data = res.json()
+            
+            if "people" not in data or len(data["people"]) == 0:
+                return f"Error: MLB Player '{player_name}' not found. Try full English name (e.g., 'Shohei Ohtani')."
+
+            # 取得第一筆搜尋結果的 ID 和全名
+            player = data["people"][0]
+            player_id = player["id"]
+            full_name = player["fullName"]
+            team_name = "Free Agent" # 預設自由球員
+            
+            # 嘗試取得目前球隊名稱
+            current_team_link = player.get("currentTeam", {}).get("link", "")
+            if current_team_link:
+                 # 這裡為了簡化，直接用 API 回傳的 team id 查有點複雜，我們先保留球員基本資料
+                 # 通常 API 會回傳 currentTeam 的 id，這裡暫時略過額外請求以加快速度
+                 pass
+
+            # 2. 查詢該球員的詳細數據 (Hydrate Stats)
+            # type=season 代表抓取完整賽季數據，group=hitting 代表打擊數據
+            stats_url = f"https://statsapi.mlb.com/api/v1/people/{player_id}"
+            stats_params = {
+                "hydrate": "stats(group=[hitting],type=[season])"
+            }
+            
+            stats_res = requests.get(stats_url, params=stats_params, timeout=5)
+            stats_data = stats_res.json()
+
+            # 3. 解析數據
+            # 路徑比較深：people -> stats -> splits -> stat
+            try:
+                stats_container = stats_data["people"][0]["stats"]
+                
+                # 找到 "hitting" 類型的數據
+                hitting_stats = None
+                for group in stats_container:
+                    if group["group"]["displayName"] == "hitting" and "splits" in group:
+                        # 取得最後一筆 (通常是最近的賽季)
+                        if len(group["splits"]) > 0:
+                            hitting_stats = group["splits"][-1]
+                            break
+                
+                if hitting_stats:
+                    season = hitting_stats.get("season", "Unknown")
+                    stat_body = hitting_stats["stat"]
+                    
+                    avg = stat_body.get("avg", ".---")  # 打擊率
+                    hr = stat_body.get("homeRuns", 0)   # 全壘打
+                    ops = stat_body.get("ops", ".---")  # 整體攻擊指數
+                    hits = stat_body.get("hits", 0)     # 安打數
+                    games = stat_body.get("gamesPlayed", 0)
+
+                    return (
+                        f"⚾ MLB Stats: {full_name} ({season} Season)\n"
+                        f"----------------------------------\n"
+                        f"📊 Batting Average (AVG): {avg}\n"
+                        f"🚀 Home Runs (HR): {hr}\n"
+                        f"💪 OPS: {ops}\n"
+                        f"⚾ Hits: {hits} in {games} games\n"
+                        f"(Source: official statsapi.mlb.com)"
+                    )
+                else:
+                    return f"No hitting stats found for {full_name} (Might be a Pitcher or inactive)."
+
+            except (KeyError, IndexError):
+                return f"Error parsing stats for {full_name}. Structure changed or no data."
+
+        except Exception as e:
+            return f"MLB Tool Error: {str(e)}"
+
