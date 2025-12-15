@@ -227,8 +227,6 @@ class Tools:
         try:
             print(f"[System] Searching MLB stats for '{player_name}'...")
             
-            # 1. 搜尋球員 ID (Lookup Player)
-            # MLB API 搜尋接口
             search_url = "https://statsapi.mlb.com/api/v1/people/search"
             params = {"names": player_name, "active": "true"} # 只找現役球員
             
@@ -238,21 +236,15 @@ class Tools:
             if "people" not in data or len(data["people"]) == 0:
                 return f"Error: MLB Player '{player_name}' not found. Try full English name (e.g., 'Shohei Ohtani')."
 
-            # 取得第一筆搜尋結果的 ID 和全名
             player = data["people"][0]
             player_id = player["id"]
             full_name = player["fullName"]
             team_name = "Free Agent" # 預設自由球員
             
-            # 嘗試取得目前球隊名稱
             current_team_link = player.get("currentTeam", {}).get("link", "")
             if current_team_link:
-                 # 這裡為了簡化，直接用 API 回傳的 team id 查有點複雜，我們先保留球員基本資料
-                 # 通常 API 會回傳 currentTeam 的 id，這裡暫時略過額外請求以加快速度
                  pass
 
-            # 2. 查詢該球員的詳細數據 (Hydrate Stats)
-            # type=season 代表抓取完整賽季數據，group=hitting 代表打擊數據
             stats_url = f"https://statsapi.mlb.com/api/v1/people/{player_id}"
             stats_params = {
                 "hydrate": "stats(group=[hitting],type=[season])"
@@ -260,17 +252,12 @@ class Tools:
             
             stats_res = requests.get(stats_url, params=stats_params, timeout=5)
             stats_data = stats_res.json()
-
-            # 3. 解析數據
-            # 路徑比較深：people -> stats -> splits -> stat
             try:
                 stats_container = stats_data["people"][0]["stats"]
                 
-                # 找到 "hitting" 類型的數據
                 hitting_stats = None
                 for group in stats_container:
                     if group["group"]["displayName"] == "hitting" and "splits" in group:
-                        # 取得最後一筆 (通常是最近的賽季)
                         if len(group["splits"]) > 0:
                             hitting_stats = group["splits"][-1]
                             break
@@ -302,4 +289,5 @@ class Tools:
 
         except Exception as e:
             return f"MLB Tool Error: {str(e)}"
+
 
