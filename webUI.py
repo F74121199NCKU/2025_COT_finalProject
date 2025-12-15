@@ -3,108 +3,215 @@ import json
 import datetime
 import random
 import math
+import xml.etree.ElementTree as ET
+
 
 class Tools:
     def __init__(self):
         pass
 
+    # --- 1. 天氣 (升級版：支援中文 + 台灣優先 + 真實降雨機率) ---
     def get_weather(self, city: str) -> str:
         """
-        查詢某個城市的即時天氣 (使用 Open-Meteo API，解決 Docker 連線問題)。
-        :param city: 城市英文名稱 (例如: "Tainan", "Taipei")
+        Get current weather and rain chance for a city.
+        Supports Chinese and English city names.
+        :param city: City name (e.g. "Taipei", "台北", "Tainan").
         """
         try:
-            print(f"   [系統] 正在查詢 {city} 的經緯度...")
-            # 1. 偽裝 Header (避免被擋)
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            }
+            print(f"[System] Getting weather for {city}...")
+            headers = {"User-Agent": "Mozilla/5.0"}
 
-            # 2. 先查經緯度 (Geocoding)
-            # 使用 verify=False 跳過 SSL 驗證，確保 Docker 內一定能連
-            geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&language=en&format=json"
-            geo_res = requests.get(geo_url, headers=headers, verify=False, timeout=10)
+            # 1. 查經緯度 (中文相容 + 台灣優先)
+            geo_url = "https://geocoding-api.open-meteo.com/v1/search"
+            params = {"name": city, "count": 5, "format": "json"}
+
+            geo_res = requests.get(
+                geo_url, params=params, headers=headers, verify=False, timeout=5
+            )
             geo_data = geo_res.json()
 
             if "results" not in geo_data:
-                return f"找不到城市: {city}，請嘗試使用英文名稱 (如 Tainan)。"
+                return f"Error: City '{city}' not found."
 
-            lat = geo_data["results"][0]["latitude"]
-            lon = geo_data["results"][0]["longitude"]
-            city_name = geo_data["results"][0]["name"]
+            # --- 台灣優先演算法 ---
+            target_result = geo_data["results"][0]
+            for res in geo_data["results"]:
+                if res.get("country_code") == "TW":
+                    target_result = res
+                    break
+            # --------------------
 
-            # 3. 再查天氣
-            weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
-            weather_res = requests.get(weather_url, headers=headers, verify=False, timeout=10)
-            weather_data = weather_res.json()
+            lat = target_result["latitude"]
+            lon = target_result["longitude"]
+            city_name = target_result["name"]
+            country = target_result.get("country", "Unknown")
 
-            if "current_weather" in weather_data:
-                temp = weather_data["current_weather"]["temperature"]
-                wind = weather_data["current_weather"]["windspeed"]
-                return f"Weather in {city_name}: Temperature {temp}°C, Wind Speed {wind} km/h"
+            # 2. 查天氣 (關鍵修改：新增 daily=precipitation_probability_max)
+            # timezone=auto 很重要，這樣才能抓到當地正確日期的降雨機率
+            weather_url = (
+                f"https://api.open-meteo.com/v1/forecast?"
+                f"latitude={lat}&longitude={lon}"
+                f"&current_weather=true"
+                f"&daily=precipitation_probability_max"
+                f"&timezone=auto"
+            )
+
+            weather_res = requests.get(
+                weather_url, headers=headers, verify=False, timeout=5
+            )
+            w_data = weather_res.json()
+
+            # 解析目前天氣
+            current = w_data["current_weather"]
+
+            # 解析降雨機率 (抓今天的第一筆資料)
+            if "daily" in w_data and "precipitation_probability_max" in w_data["daily"]:
+                rain_prob = w_data["daily"]["precipitation_probability_max"][0]
+                rain_msg = f"Rain Chance: {rain_prob}%"
             else:
-                return "無法取得氣象資料"
+                rain_msg = "Rain Chance: Unknown"
+
+            # WMO 代碼翻譯
+            wmo_code = current["weathercode"]
+            condition = "Clear"
+            if wmo_code in [1, 2, 3]:
+                condition = "Cloudy (多雲)"
+            elif wmo_code in [45, 48]:
+                condition = "Foggy (有霧)"
+            elif wmo_code in [51, 53, 55, 61, 63, 65]:
+                condition = "Rainy (下雨)"
+            elif wmo_code >= 80:
+                condition = "Storm/Showers (雷雨/陣雨)"
+
+            return (
+                f"Weather in {city_name}, {country}: "
+                f"{condition} (Code {wmo_code}), "
+                f"Temp: {current['temperature']}°C, "
+                f"Wind: {current['windspeed']} km/h, "
+                f"{rain_msg}"
+            )  # 這裡把降雨機率加進去回傳字串
 
         except Exception as e:
-            return f"API 連線錯誤: {str(e)}"
+            return f"Weather API Error: {str(e)}"
+
+    # --- 2. 虛擬貨幣 (維持：強制轉英文幣名) ---
     def get_crypto_price(self, coin_name: str) -> str:
         """
-        查詢加密貨幣的即時美金價格。
-        :param coin_name: 貨幣英文名稱 (例如: "bitcoin")
+        Get cryptocurrency price and 24h change.
+
+        IMPORTANT: The API requires the English ID of the cryptocurrency.
+        If the user asks for "比特幣", you MUST pass "bitcoin".
+        If the user asks for "以太幣", you MUST pass "ethereum".
+
+        :param coin_name: The English ID of the cryptocurrency (lowercase).
         """
         try:
             coin_id = coin_name.lower()
-            url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
-            response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
-            data = response.json()
-            if coin_id in data:
-                return f"{coin_name} 目前價格: {data[coin_id]['usd']} USD"
-            return f"找不到 {coin_name}"
-        except:
-            return "價格查詢失敗"
+            url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd&include_24hr_change=true"
+            res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+            data = res.json()
 
+            if coin_id in data:
+                price = data[coin_id]["usd"]
+                change = data[coin_id].get("usd_24h_change", 0)
+                change_str = f"{change:+.2f}%"
+                return f"{coin_name.title()}: ${price:,} USD (24h Change: {change_str})"
+            return f"Error: '{coin_name}' not found. Try English ID (e.g., bitcoin)."
+        except Exception as e:
+            return f"Crypto API Error: {str(e)}"
+
+    # --- 3. 新聞 (維持中文搜尋，前 5 則) ---
+    def get_news(self, query: str) -> str:
+        """
+        Search for latest news headlines from Google News.
+        This function supports Chinese keywords directly.
+
+        :param query: Keywords to search (e.g., "Taiwan", "Technology").
+        """
+        try:
+            url = f"https://news.google.com/rss/search?q={query}+when:1d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+            headers = {"User-Agent": "Mozilla/5.0"}
+            res = requests.get(url, headers=headers, timeout=5)
+
+            if res.status_code != 200:
+                return f"Google News Error: {res.status_code}"
+
+            root = ET.fromstring(res.content)
+            items = root.findall("./channel/item")
+
+            if not items:
+                return "Google News found no results."
+
+            news_output = f"【Latest News for '{query}'】\n"
+            for i, item in enumerate(items[:5], 1):
+                title = item.find("title").text
+                pubDate = item.find("pubDate").text
+                news_output += f"{i}. {title} ({pubDate})\n"
+
+            return news_output
+
+        except Exception as e:
+            return f"News Tool Error: {str(e)}"
+
+    # --- 4. 維基百科 (維持模糊搜尋) ---
     def get_wikipedia_summary(self, keyword: str) -> str:
         """
-        查詢維基百科摘要。
-        :param keyword: 搜尋關鍵字
+        Search Wikipedia summary.
+        Supports both Chinese and English keywords.
+        :param keyword: The search term.
         """
         try:
             search_url = f"https://zh.wikipedia.org/w/api.php?action=query&list=search&srsearch={keyword}&format=json"
-            search_res = requests.get(search_url).json()
+            search_res = requests.get(search_url, timeout=5).json()
             if "query" in search_res and "search" in search_res["query"]:
                 results = search_res["query"]["search"]
                 if len(results) > 0:
-                    best_title = results[0]["title"]
-                    summary_url = f"https://zh.wikipedia.org/api/rest_v1/page/summary/{best_title}"
-                    summary_res = requests.get(summary_url)
+                    title = results[0]["title"]
+                    summary_url = (
+                        f"https://zh.wikipedia.org/api/rest_v1/page/summary/{title}"
+                    )
+                    summary_res = requests.get(summary_url, timeout=5)
                     if summary_res.status_code == 200:
-                        data = summary_res.json()
-                        return f"維基百科 ({best_title}): {data.get('extract', '無摘要')}"
-            return "搜尋不到結果"
+                        return f"Wiki ({title}): {summary_res.json().get('extract', 'No summary')}"
+            return "Wiki: No result found."
         except Exception as e:
-            return f"維基百科錯誤: {e}"
+            return f"Wiki Error: {e}"
 
+    # --- 5. 安全數學計算機 ---
     def calculate_expression(self, expression: str) -> str:
         """
-        執行數學運算。
-        :param expression: 數學算式 (例如: "23*45")
+        Calculate math expression.
+        :param expression: Math string (e.g., "23 * 45").
         """
         try:
-            allowed_names = {"math": math, "abs": abs, "round": round}
-            result = eval(expression, {"__builtins__": None}, allowed_names)
-            return f"計算結果: {result}"
+            safe_dict = {
+                "__builtins__": None,
+                "math": math,
+                "abs": abs,
+                "round": round,
+                "min": min,
+                "max": max,
+            }
+            for name in dir(math):
+                if not name.startswith("__"):
+                    safe_dict[name] = getattr(math, name)
+            result = eval(expression, safe_dict)
+            return f"Result: {result}"
         except Exception as e:
-            return f"計算錯誤: {e}"
+            return f"Math Error: {e}"
 
+    # --- 6. 時間與骰子 ---
+    # --- 6. 時間 (修正版：強制鎖定台灣時區 UTC+8) ---
     def get_current_time(self) -> str:
-        """
-        查詢現在時間。
-        """
-        now = datetime.datetime.now()
-        return f"現在時間: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+        """Get current time in Taiwan (UTC+8)."""
+        # 1. 取得標準 UTC 時間
+        utc_now = datetime.datetime.now(datetime.timezone.utc)
+
+        # 2. 手動加 8 小時
+        tw_time = utc_now + datetime.timedelta(hours=8)
+
+        return f"現在時間 (台灣): {tw_time.strftime('%Y-%m-%d %H:%M:%S')}"
 
     def roll_dice(self) -> str:
-        """
-        擲骰子。
-        """
-        return f"骰子結果: {random.randint(1, 6)} 點"
+        """Roll a 6-sided dice."""
+        return f"Dice Result: {random.randint(1, 6)}"
