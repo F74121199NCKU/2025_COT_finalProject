@@ -1,0 +1,11 @@
+data/
+__pycache__/
+*.pyc
+.env
+.env.local
+.venv/
+env/
+venv/
+docker-compose.yaml
+memory.json
+toc_agent/

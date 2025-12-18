@@ -6,3 +6,7 @@ __開啟localhost__
 ngrok config add-authtoken (YOUR ID)
 ngrok http 3000
 複製 Forwarding後的網址即可
+
+架設docker_pipelines
+docker-compose restart pipelines
+docker-compose up -d    (需等待下載時間)
