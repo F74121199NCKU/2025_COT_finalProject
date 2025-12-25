@@ -9,4 +9,6 @@ ngrok http 3000
 
 架設docker_pipelines
 docker-compose restart pipelines
+docker-compose down
 docker-compose up -d    (需等待下載時間)
+docker-compose down

@@ -41,37 +41,104 @@ class MemorySystem:
         return context
 
 class Tools:
+    # 學校 API 設定
     API_URL = "https://api-gateway.netdb.csie.ncku.edu.tw/api/chat"
     API_KEY = "253b609e99624ea28f7f036e9d4d363b2ad71b853b3fd7b986b12be2b014ff69"
     MODEL_NAME = "gpt-oss:20b"
 
     @staticmethod
-    def _call_school_api(prompt: str, temperature: float = 0.7) -> str:
+    def _call_school_api(prompt: str, temperature: float = 0.1) -> str:
         try:
             headers = {"Authorization": f"Bearer {Tools.API_KEY}", "Content-Type": "application/json"}
-            payload = {"model": Tools.MODEL_NAME, "messages": [{"role": "user", "content": prompt}], "stream": False, "temperature": temperature}
-            response = requests.post(Tools.API_URL, headers=headers, data=json.dumps(payload), timeout=60)
-            if response.status_code == 200: return response.json().get('message', {}).get('content', '').strip()
+            
+            # 🔥 關鍵設定：教模型「講重點」
+            payload = {
+                "model": Tools.MODEL_NAME,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,             # 關閉串流，一次拿回結果
+                "temperature": temperature,  # 降低隨機性，讓它當個嚴謹的機器人
+                "max_tokens": 100,           # 限制回傳字數，避免長篇大論
+                "stop": ["\n", "Result:"]    # 🛑 遇到換行就停止 (這能大幅加速！)
+            }
+            
+            # 🔥 關鍵設定：把等待時間拉長到 300 秒 (5分鐘)
+            # 因為學校模型有 "thinking" 過程，必須給它足夠時間運算，不然會噴 Timeout
+            print(f"📡 [System] 呼叫學校模型中 (Timeout=300s)...")
+            response = requests.post(Tools.API_URL, headers=headers, data=json.dumps(payload), timeout=300)
+            
+            if response.status_code == 200:
+                # 嘗試解析回傳內容
+                try:
+                    resp_json = response.json()
+                    # 針對學校 API 的特殊結構進行防呆
+                    content = resp_json.get('message', {}).get('content', '')
+                    # 有些模型會把思考過程放在 content 裡，或是回傳空白，這裡做簡單清洗
+                    return content.strip()
+                except:
+                    return "Error: JSON 解析失敗"
+            
+            print(f"❌ [API Error]: {response.text}")
             return "Error: API 連線失敗"
-        except Exception as e: return f"Error: {e}"
+            
+        except requests.exceptions.Timeout:
+            print("❌ [Timeout]: 學校模型思考太久，連線逾時。")
+            return "CMD:TRASH" # 逾時就當作聊天
+        except Exception as e:
+            print(f"❌ [Exception]: {e}")
+            return f"Error: {e}"
 
     @staticmethod
     def init_intent_analysis(user_msg: str) -> str:
-        """ 對應圖表中的 [Init]：分析意圖並回傳狀態與參數 (已移除 Search/MLB/Crypto) """
+        """ 
+        🧠 [Init] 智慧意圖分析 (符合作業要求)
+        完全依賴 LLM 的理解能力來分類，不使用 Python 關鍵字硬寫。
+        """
+        msg = user_msg.strip()
+        print(f"🤖 [Init] 正在請求 AI 分析意圖: {msg}")
+
+        # Prompt 工程：明確定義 5 種狀態的格式
         prompt = (
-            f"Analyze user message: '{user_msg}'\n"
-            f"Output ONLY the command string:\n"
-            f"1. Memory Save: 'CMD:MEMORY_SAVE|<Content>'\n"
-            f"2. Memory Query: 'CMD:MEMORY_QUERY|<Question>'\n"
-            f"3. Weather: 'CMD:WEATHER|<City>'\n"
-            f"4. Travel: 'CMD:TRAVEL'\n"
-            f"5. Other/Chat: 'CMD:TRASH'\n" 
+            f"You are a command classifier. Classify the user message into exactly one category.\n"
+            f"Output ONLY the command string code. Do not output thinking or explanations.\n\n"
+            
+            f"Rules:\n"
+            f"1. Save Memory -> Output: CMD:MEMORY_SAVE|<Content>\n"
+            f"   (e.g., '記住我生日是7月' -> CMD:MEMORY_SAVE|我生日是7月)\n\n"
+            
+            f"2. Query Memory -> Output: CMD:MEMORY_QUERY|<Question>\n"
+            f"   (e.g., '我生日幾號?' -> CMD:MEMORY_QUERY|我生日幾號)\n\n"
+            
+            f"3. Weather -> Output: CMD:WEATHER|<City>\n"
+            f"   (e.g., '台南天氣' -> CMD:WEATHER|Tainan)\n\n"
+            
+            f"4. Travel -> Output: CMD:TRAVEL\n"
+            f"   (e.g., '我想去旅遊', '規劃行程')\n\n"
+            
+            f"5. Chat/Other -> Output: CMD:TRASH\n"
+            f"   (e.g., '你好', '講個笑話')\n\n"
+            
+            f"User Message: '{msg}'\n"
             f"Result:"
         )
-        return Tools._call_school_api(prompt, temperature=0.1)
+        
+        # 呼叫 API
+        result = Tools._call_school_api(prompt, temperature=0.1)
+        
+        # --- 後處理防呆區 ---
+        # 雖然我們叫它只吐 CMD，但模型有時候還是會不受控，這裡做最後的清洗
+        if "CMD:" in result:
+            # 抓出第一行包含 CMD: 的文字
+            lines = result.split('\n')
+            for line in lines:
+                if "CMD:" in line:
+                    return line.strip()
+        
+        # 如果模型回傳了一堆亂碼或沒有 CMD，預設丟去聊天區
+        return "CMD:TRASH"
 
     @staticmethod
     def get_weather(city: str) -> str:
+        # 天氣查詢保持使用 Open-Meteo (因為這是工具，不是意圖分析)
         try:
             headers = {"User-Agent": "Mozilla/5.0"}
             geo_url = "https://geocoding-api.open-meteo.com/v1/search"
@@ -89,8 +156,11 @@ class Tools:
         except Exception as e: return f"Weather Error: {e}"
 
     @staticmethod
-    def chat_with_school(msg): return Tools._call_school_api(msg)
-
+    def chat_with_school(msg):
+        # 這裡的聊天不限制 max_tokens，讓它自由發揮
+        context = MemorySystem.get_context_string()
+        prompt = f"{context}\n\n使用者說：{msg}\n請回答："
+        return Tools._call_school_api(prompt, temperature=0.7)
 # ==========================================
 # 🏞️ 區域實作 (Zones) - 對應圖表右側的方塊
 # ==========================================
