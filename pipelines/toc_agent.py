@@ -194,16 +194,18 @@ class ZoneTravel(StateMachine):
     idle = State("Idle", initial=True)
     collecting_dest = State("Collecting Destination")
     collecting_date = State("Collecting Date")
+    collecting_style = State("Collecting Style") #新增風格
     processing = State("Processing")
 
     start_plan = idle.to(collecting_dest)
     got_dest = collecting_dest.to(collecting_date)
-    got_date = collecting_date.to(processing)
+    got_date = collecting_date.to(collecting_style)
+    got_style = collecting_style.to(processing)
     finish = processing.to(idle)
-    reset = collecting_dest.to(idle) | collecting_date.to(idle) | processing.to(idle)
+    reset = collecting_dest.to(idle) | collecting_date.to(idle) | collecting_style.to(idle) | processing.to(idle)
 
     def __init__(self):
-        self.trip_data = {"dest": None, "date": None}
+        self.trip_data = {"dest": None, "date": None, "style": None}
         super().__init__()
 
     def on_enter_collecting_dest(self):
@@ -214,12 +216,20 @@ class ZoneTravel(StateMachine):
         weather_hint = Tools.get_weather(dest) 
         return f"好的，目的地是 {dest}。\n(系統資訊: {weather_hint})\n\n請問您預計什麼時候出發？"
 
+    def on_enter_collecting_style(self):
+        return "了解。最後請問您這趟旅程偏好什麼風格？例如：省錢🤑、美食之旅🥰、古蹟巡禮、輕鬆漫遊"
+
     def on_enter_processing(self):
         dest = self.trip_data['dest']
         date = self.trip_data['date']
-        prompt = f"請為我去 {dest} 旅行規劃一日遊行程，日期是 {date}。請提供詳細景點與美食建議，並用繁體中文回答。"
+        style = self.trip_data['style'] #風格
+        prompt = (
+            f"請為我去 {dest} 旅行規劃一日遊行程，日期是 {date}。\n"
+            f"我的旅遊風格偏好是：【{style}】。\n"
+            f"請根據此風格推薦景點與餐廳，並附上詳細時間安排，要用繁體中文回答。"
+        )
         plan = Tools.chat_with_school(prompt)
-        return f"✅ 行程規劃完成！\n\n{plan}"
+        return f"👌 根據您的【{style}】偏好，行程規劃完成！👌\n\n{plan}"
 
 # ==========================================
 # 🎛️ 核心選擇器 (Selector) - 對應圖表中間的大方塊
