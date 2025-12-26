@@ -1,3 +1,9 @@
+"""
+title: TOC Ultimate Agent
+author: NCKU Student
+description: A FSM-based travel agent
+requirements: python-statemachine, requests, pydantic
+"""
 import os
 import requests
 import json
