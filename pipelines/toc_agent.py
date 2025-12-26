@@ -285,7 +285,7 @@ class Pipeline:
                     fsm.trip_data["date"] = msg
                     fsm.got_date()
                     yield f"✅ [旅遊區]：收到日期!\n\n"
-                    yield fsm.on_enter_processing()
+                    yield fsm.on_enter_collecting_style()
                 elif fsm.current_state == fsm.collecting_style:
                     fsm.trip_data["style"] = msg
                     fsm.got_style() # 狀態變為 processing
