@@ -1,5 +1,0 @@
-python-statemachine
-graphviz
-matplotlib
-requests
-beautifulsoup4
