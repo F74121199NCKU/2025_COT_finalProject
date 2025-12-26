@@ -5,7 +5,7 @@ import re
 import datetime
 from typing import List, Union, Generator, Iterator
 from pydantic import BaseModel
-from statemachine import StateMachine, State
+from statemachine import StateMachine, State    #type: ignore
 
 # ==========================================
 # 🧱 基礎建設 (Tools & Memory)
