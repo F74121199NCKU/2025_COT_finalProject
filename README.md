@@ -22,7 +22,7 @@ docker pull ghcr.io/open-webui/open-webui:main
 docker run -d -p 3000:8080 -v open-webui:/app/backend/data --name COT_AI ghcr.io/open-webui/open-webui:main
 ```
 
-> [!TIP] 參數說明
+>  參數說明
 > 
 > - `-d`: 在背景執行 (Detached mode)。
 >     
