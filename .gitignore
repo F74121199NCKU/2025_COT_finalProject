@@ -6,7 +6,6 @@ __pycache__/
 .venv/
 env/
 venv/
-docker-compose.yaml
 memory.json
 toc_agent/
 test.py

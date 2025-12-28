@@ -1,0 +1,72 @@
+services:
+  ollama:
+    volumes:
+      - ollama:/root/.ollama
+    container_name: ollama
+    pull_policy: always
+    tty: true
+    restart: always
+    image: ollama/ollama:latest
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    volumes:
+      - open-webui:/app/backend/data
+    ports:
+      - "3000:8080"
+    environment:
+      - 'OLLAMA_BASE_URL=http://ollama:11434'
+      - 'WEBUI_SECRET_KEY=t0p-s3cr3t'
+      # 🔥 這裡開啟了註冊功能
+      - ENABLE_SIGNUP=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+
+  pipelines:
+    image: ghcr.io/open-webui/pipelines:main
+    container_name: pipelines
+    volumes:
+      - ./pipelines:/app/pipelines  # <--- 確保這行存在，這代表「使用我電腦硬碟裡的檔案」
+    ports:
+      - "9099:9099"
+    environment:
+      # 🔥 請把下面這行刪掉或加 # 註解掉！不要讓它再去網路下載了！
+      # - PIPELINES_URLS=https://raw.githubusercontent.com/... 
+      - PIPELINES_REQUIREMENTS_PATH=/app/pipelines/requirements.txt
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+# 🔥🔥🔥 關鍵！你剛剛報錯就是因為少了下面這塊 🔥🔥🔥
+volumes:
+  ollama:
+  open-webui:
+
+# ==============================================================================
+# 🏗️ 系統架構設計與決策說明 (Architecture Design Rationale)
+# ==============================================================================
+# 
+# 1. 資源優化策略 (Resource Optimization)
+#    - 決策：註解掉 Ollama 服務，改用 NCKU API Gateway。
+#    - 原因：實驗室電腦或輕薄筆電可能缺乏獨立顯卡 (GPU)，無法流暢運行 7B/20B 參數模型。
+#    - 效益：將重度運算外包給伺服器，確保 WebUI 操作流暢不卡頓。
+#
+# 2. 開發效率策略 (Development Efficiency)
+#    - 決策：Pipelines 服務採用 Volume 掛載 (./pipelines:/app/pipelines)。
+#    - 原因：Docker 預設環境是封閉的，每次修改程式碼都需要 Rebuild 非常耗時。
+#    - 效益：實現「熱重載 (Hot Reload)」，在 VS Code 修改 FSM 邏輯存檔後，
+#            容器內部即時更新，大幅縮短 Debug 時間。
+#
+# 3. 服務解耦策略 (Service Decoupling)
+#    - 決策：透過 Environment Variables 分別設定多個 OpenAI API 來源。
+#    - 原因：將「UI 展示層」(WebUI)、「業務邏輯層」(Pipelines) 與「推論層」(API) 分離。
+#    - 效益：架構靈活，未來若要切換模型 (如 GPT-4 或 Gemini)，只需修改變數，
+#            無需更動核心程式碼。
+#
+# 4. 網路通訊策略 (Network Connectivity)
+#    - 決策：配置 extra_hosts: "host.docker.internal:host-gateway"。
+#    - 原因：Docker 容器網路預設隔離，難以存取宿主機 (Localhost) 資源。
+#    - 效益：打通容器內外網路，確保各個服務與本機之間能無縫溝通，
+#            避免 Connection Refused 錯誤。
+# ==============================================================================
