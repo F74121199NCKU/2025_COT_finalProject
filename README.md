@@ -80,6 +80,7 @@ ngrok http 3000
 .
 ├── toc_agent.py          # 主程式 (包含 Pipe, FSM, Tools, KeyManager)
 ├── toc_memory.json       # (自動生成) 儲存使用者記憶的 JSON 檔案
+├── docker-compose.yaml   # 設置docker環境和連線
 └── requirements.txt      # 專案依賴套件列表
 ```
 
@@ -123,6 +124,10 @@ ngrok http 3000
     Agent 回應：
       ```✅ 出發日期：2025-01-01。```
        ```請問這次旅行要安排 **幾天**。```<br>
+    使用者輸入：
+      ```三天兩夜```<br>
+    Agent 回應：
+      ```🚀 正在為您規劃 日本京都 的 3 天行程 (正在確認每日天氣...)```<br>
     
     
 
