@@ -74,14 +74,15 @@ ngrok http 3000
       'primaryBorderColor': '#fff',
       'lineColor': '#38bdf8',
       'secondaryColor': '#006100',
-      'tertiaryColor': '#fff'
+      'tertiaryColor': '#fff',
+      'clusterBkg': '#111'
     }
   }
 }%%
 
 graph TD
     %% ==========================================
-    %% 🎨 樣式定義區
+    %% 🎨 樣式定義區 (高對比配色)
     %% ==========================================
     classDef start fill:#331133,stroke:#ff79c6,stroke-width:3px,color:#fff;
     classDef logic fill:#0d1117,stroke:#38bdf8,stroke-width:2px,stroke-dasharray: 5 5,color:#fff;
@@ -89,84 +90,115 @@ graph TD
     classDef fsm fill:#2a1a00,stroke:#ffb86c,stroke-width:2px,color:#fff;
     classDef api fill:#1a0f2e,stroke:#bd93f9,stroke-width:2px,color:#fff;
     classDef optimization fill:#003366,stroke:#00ccff,stroke-width:2px,color:#fff,stroke-dasharray: 2 2;
+    classDef decision fill:#660000,stroke:#ff0000,stroke-width:2px,color:#fff;
+    classDef trash fill:#333,stroke:#777,stroke-width:1px,color:#ccc;
 
     %% ==========================================
-    %% 🔗 系統主流程
+    %% 1. 頂層輸入與分流 (Top Layer)
     %% ==========================================
     User([使用者輸入]) --> Pipe[Pipe.pipe]:::start
+    Pipe --> KeywordCheck{"關鍵字判斷?"}:::optimization
     
-    %% 1. FSM 狀態檢查
-    Pipe --> CheckActive{"FSM<br>進行中?"}:::logic
+    KeywordCheck -- "命中" --> SetIntent[鎖定 Intent]:::process
+    KeywordCheck -- "無命中" --> LLM_Classify[LLM 意圖分類]:::api
     
-    CheckActive -- "Yes (State Found)" --> Restore["恢復狀態 & 設定 Intent=TRAVEL"]:::fsm
-    
-    %% 2. 意圖判斷
-    CheckActive -- No --> KeywordCheck{"關鍵字<br>光速判斷?"}:::optimization
-    
-    KeywordCheck -- "命中 (天氣/記憶/旅遊)" --> SetIntent[鎖定 Intent]:::process
-    KeywordCheck -- 無命中 --> LLM_Classify[LLM 意圖分類]:::api
-    
-    Restore --> Router((分流))
-    SetIntent --> Router
+    SetIntent --> Router((核心分流))
     LLM_Classify --> Router
 
     %% ==========================================
-    %% 🏖️ 旅遊 FSM
+    %% 2. 中層子系統 (Middle Layer - Subgraphs)
+    %% 排列技巧：利用連結順序讓 Weather 在左，Travel 在中
     %% ==========================================
-    subgraph Travel_System [✈️ 旅遊規劃系統 ZoneTravel]
+
+    %% --- [左區塊 25%] 天氣系統 ---
+    subgraph Weather_System ["☁️ 天氣系統 (25%)"]
+        style Weather_System fill:#0f1419,stroke:#50fa7b,stroke-width:2px,color:#fff
         direction TB
-        style Travel_System fill:#161b22,stroke:#ffb86c,stroke-width:2px,color:#fff
         
-        Router -->|TRAVEL| LocalParse["try_local_parse<br>本地極速解析"]:::optimization
-        LocalParse --> LLM_Extract[LLM 提取補強]:::api
+        ExtractWx[提取需求]:::process
+        CheckDate{"日期判斷"}:::logic
+        API_Current[即時天氣 API]:::api
+        API_Daily["每日預報 API<br>(支援 14 天)"]:::api
+        WxReport[回傳天氣報告]:::process
+
+        ExtractWx --> CheckDate
+        CheckDate --> API_Current & API_Daily
+        API_Current & API_Daily --> WxReport
+    end
+
+    %% --- [中區塊 50%] 旅遊系統 (最寬) ---
+    subgraph Travel_System ["✈️ 旅遊規劃系統 (50%)"]
+        style Travel_System fill:#1a1500,stroke:#ffb86c,stroke-width:2px,color:#fff
+        direction TB
+
+        LocalParse["try_local_parse"]:::optimization
+        CheckData{資料檢查}:::fsm
+        StateCollect["State: collecting..."]:::fsm
+        Processing["State: processing"]:::fsm
         
-        LLM_Extract --> CheckData{資料檢查}:::fsm
+        %% 核心邏輯
+        DayLoop{"逐日迴圈"}:::logic
+        GetDayWx["查詢該日天氣"]:::api
+        CheckRain{"天氣判斷"}:::decision
+        InjectStrategy["注入行程策略<br>(室內/室外)"]:::process
         
-        %% 狀態分支
-        CheckData -- 缺地點 --> StateDest["State: collecting_dest<br>問: 去哪裡?"]:::fsm
-        CheckData -- 缺日期 --> StateDate["State: collecting_date<br>問: 何時去?"]:::fsm
-        CheckData -- "缺天數 (New!)" --> StateDuration["State: collecting_duration<br>問: 玩幾天?"]:::fsm
+        %% 平行處理 (撐開寬度的關鍵)
+        subgraph Parallel_Block ["平行處理區 (ThreadPool)"]
+            direction LR
+            style Parallel_Block fill:#000,stroke:#666,stroke-dasharray: 5 5
+            PlanMorning[上午行程]:::api
+            PlanAfternoon[下午行程]:::api
+            PlanNight[晚上行程]:::api
+        end
         
-        %% 處理中
-        CheckData -- 資料齊全 --> Processing["State: processing"]:::fsm
-        
-        %% 🔥 修正點：加上引號避免括號解析錯誤
-        Processing --> Parallel["平行處理 (ThreadPool)"]:::process
-        
-        Parallel -->|Thread 1| PlanMorning[上午行程]:::api
-        Parallel -->|Thread 2| PlanAfternoon[下午行程]:::api
-        Parallel -->|Thread 3| PlanNight[晚上行程]:::api
-        
-        PlanMorning & PlanAfternoon & PlanNight --> Combine[合併 & 生成回應]
+        Combine[合併結果]:::process
+
+        %% 流程線
+        LocalParse --> CheckData
+        CheckData -->|缺資料| StateCollect
+        CheckData -->|資料齊全| Processing
+        Processing --> DayLoop
+        DayLoop --> GetDayWx
+        GetDayWx --> CheckRain
+        CheckRain --> InjectStrategy
+        InjectStrategy --> PlanMorning & PlanAfternoon & PlanNight
+        PlanMorning & PlanAfternoon & PlanNight --> Combine
+        Combine --> DayLoop
+    end
+
+    %% --- [右區塊 15%] 記憶系統 ---
+    subgraph Memory_System ["🧠 記憶系統 (15%)"]
+        style Memory_System fill:#150f25,stroke:#bd93f9,stroke-width:2px,color:#fff
+        direction TB
+        MemSave[寫入記憶]:::api
+        MemQuery[讀取/RAG]:::api
+    end
+
+    %% --- [角落區塊 10%] 閒聊 ---
+    subgraph Trash_Bin ["🗑️ 閒聊 (10%)"]
+        style Trash_Bin fill:#000,stroke:#555,stroke-width:1px,color:#ccc
+        Chat[一般閒聊]:::trash
     end
 
     %% ==========================================
-    %% ☁️ 天氣系統
+    %% 3. 路由連接 (Routing Connections)
     %% ==========================================
-    subgraph Weather_System [☁️ 天氣系統]
-        style Weather_System fill:#161b22,stroke:#50fa7b,stroke-width:2px,color:#fff
-        Router -->|WEATHER| ExtractWx[提取城市 & 日期]:::process
-        ExtractWx --> API_Meteo[Open-Meteo API]:::api
-        API_Meteo --> WxReport[回傳報告]
-    end
+    Router -->|WEATHER| ExtractWx
+    Router -->|TRAVEL| LocalParse
+    Router -->|MEMORY| MemSave & MemQuery
+    Router -->|TRASH| Chat
+
+    %% 跨系統連線 (Cross-System) - 這裡解決交叉問題
+    GetDayWx -.->|請求天氣| ExtractWx
+    WxReport -.->|回傳資訊| CheckRain
 
     %% ==========================================
-    %% 🧠 記憶與其他
+    %% 4. 輸出與底層資源 (Output & Resources)
     %% ==========================================
-    subgraph Memory_System [🧠 記憶系統]
-        style Memory_System fill:#161b22,stroke:#bd93f9,stroke-width:2px,color:#fff
-        Router -->|MEMORY_SAVE| MemSave[寫入 JSON]:::api
-        Router -->|MEMORY_QUERY| MemQuery[讀取 JSON + RAG]:::api
-    end
-
-    Router -->|TRASH| Chat[一般閒聊]:::api
-
-    %% ==========================================
-    %% 輸出與資源管理
-    %% ==========================================
-    StateDest & StateDate & StateDuration & Combine & WxReport & MemSave & MemQuery & Chat --> Response([回傳給使用者]):::start
-    style Response fill:#331133,stroke:#ff79c6,stroke-width:3px,color:#fff
-
-    %% Key Manager
-    KeyManager[KeyManager: 三 Key 輪詢] -.->|Authorization| PlanMorning & PlanAfternoon & PlanNight & LLM_Classify & Chat & MemQuery
+    StateCollect & Combine & WxReport & MemSave & MemQuery & Chat --> Response([回傳給使用者]):::start
+    
+    %% Key Manager 置底
+    KeyManager["🔑 KeyManager (三 Key 輪詢)"]:::optimization
     style KeyManager fill:#000,stroke:#fff,stroke-dasharray: 5 5,color:#fff
+    
+    KeyManager -.-> PlanMorning & PlanAfternoon & PlanNight & LLM_Classify & Chat & MemQuery
