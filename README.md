@@ -66,6 +66,8 @@ ngrok http 3000
 ![Backend](https://img.shields.io/badge/NCKU-API_Gateway-green)
 ![Memory](https://img.shields.io/badge/Memory-System_Active-purple?logo=obsidian&logoColor=white)
 ![Core](https://img.shields.io/badge/FSM-State_Machine-FF4B4B)
+旅遊小幫手，你規劃行程的最佳選擇AI Agent
+本專案是一個基於**OpenWebUI Pipe** 架構開發的AI Agent，整合了 **NCKU LLM API**、**氣象服務** 與 **旅遊行程規劃**。
 
 
 # **流程圖**
