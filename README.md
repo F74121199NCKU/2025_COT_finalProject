@@ -79,7 +79,7 @@ ngrok http 3000
 ├── toc_agent.py          # 主程式 (包含 Pipe, FSM, Tools, KeyManager)
 ├── toc_memory.json       # (自動生成) 儲存使用者記憶的 JSON 檔案
 ├── docker-compose.yaml   # 設置docker環境和連線
-└── requirements.txt      # 專案依賴套件列表
+└── requirements.toml      # 專案依賴套件與環境列表
 ```
 
 ## 功能特色
