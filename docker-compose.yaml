@@ -18,7 +18,7 @@ services:
     environment:
       - 'OLLAMA_BASE_URL=http://ollama:11434'
       - 'WEBUI_SECRET_KEY=t0p-s3cr3t'
-      # 🔥 這裡開啟了註冊功能
+      # 這裡開啟了註冊功能
       - ENABLE_SIGNUP=true
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -32,13 +32,10 @@ services:
     ports:
       - "9099:9099"
     environment:
-      # 🔥 請把下面這行刪掉或加 # 註解掉！不要讓它再去網路下載了！
-      # - PIPELINES_URLS=https://raw.githubusercontent.com/... 
       - PIPELINES_REQUIREMENTS_PATH=/app/pipelines/requirements.txt
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: always
-# 🔥🔥🔥 關鍵！你剛剛報錯就是因為少了下面這塊 🔥🔥🔥
 volumes:
   ollama:
   open-webui:
