@@ -61,8 +61,31 @@ ngrok http 3000
 
 ---
 
+# TOC_FinalProject_TravelAssistant✈️
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
+![Backend](https://img.shields.io/badge/NCKU-API_Gateway-green)
+![Memory](https://img.shields.io/badge/Memory-System_Active-purple?logo=obsidian&logoColor=white)
+![Core](https://img.shields.io/badge/FSM-State_Machine-FF4B4B)
 
+旅遊小幫手，你規劃行程的最佳選擇<br>
+本專案是一個基於**OpenWebUI Pipe** 架構開發的AI Agent，整合了 **NCKU LLM API**、**氣象服務** 與 **旅遊行程規劃**。
 
+## 三大功能：
+  - 🌥️天氣查詢<br>
+  - 🧠記憶系統<br>
+  - 🗺️旅遊規劃<br>
+
+## 📂 檔案結構
+```
+.
+├── toc_agent.py          # 主程式 (包含 Pipe, FSM, Tools, KeyManager)
+├── toc_memory.json       # (自動生成) 儲存使用者記憶的 JSON 檔案
+└── requirements.txt      # 專案依賴套件列表
+```
+
+## 功能特色
+  - 🔑 三組API Key輪詢<br>
+    - 自動在 3 組 API Key 之間切換，大幅降低 ```Too Many Requests``` 的風險
 # **流程圖**
 ```mermaid 
 %%{
