@@ -293,6 +293,22 @@ class Tools:
         return {}
 
     @staticmethod
+    def extract_city(msg: str) -> str:
+        """
+        從句子中抓出城市名稱，確保 get_weather 能查到資料。
+        """
+        prompt = (
+            f"Extract the city name from the user input.\n"
+            f"Input: '{msg}'\n"
+            f"Rules:\n"
+            f"1. Output ONLY the city name (e.g., 'Taipei', 'Tainan', 'London').\n"
+            f"2. If no city is found, output 'None'.\n"
+            f"Result:"
+        )
+        # 使用穩定版 (Block) 讀取，因為我們只需要一個詞
+        return Tools._call_block(prompt).strip()
+
+    @staticmethod
     def get_weather(city: str) -> str:
         try:
             #爬蟲抓取資訊
@@ -443,8 +459,18 @@ class Pipe:
             
             # 其他功能 (天氣 / 記憶 / 閒聊)
             if intent_type == "WEATHER":
-                yield "☁️ 查詢天氣中...\n"
-                yield from Tools._call_smart(f"請幫我查一下這個地方的天氣：{msg}")
+                yield "☁️ 分析地名中...\n"
+                
+                # 先抓出乾淨的地名
+                city = Tools.extract_city(msg)
+                
+                if city and city != "None":
+                    yield f"🔍 正在查詢 **{city}** 的天氣...\n"
+                    # 2. 真正呼叫 Python 爬蟲函式
+                    weather_report = Tools.get_weather(city)
+                    yield weather_report
+                else:
+                    yield "⚠️ 找不到城市名稱，請試著說簡短一點，例如：「台北天氣」。"
             
             # 處理儲存記憶
             elif intent_type == "MEMORY_SAVE":
