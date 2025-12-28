@@ -86,6 +86,14 @@ ngrok http 3000
 ## 功能特色
   - 🔑 三組API Key輪詢<br>
     - 自動在 3 組 API Key 之間切換，大幅降低 ```Too Many Requests``` 的風險
+    - 在生成多天數行程時，利用 ```concurrent.futures``` 結合多 Key 進行平行加速，避免等很久的情況
+  - 🗺️ 旅遊規劃狀態機
+    - 使用 python-statemachine 管理對話狀態
+    - 關鍵字快篩 與 LLM 意圖判斷，能精準識別使用者想法。
+    - 行程規劃時，會自動呼叫 Open-Meteo API 查詢當地氣象，並在行程中標註雨天備案
+  - 🧠 本地記憶庫
+    - ```SAVE``` 識別「幫我記住...」指令，將資訊存入 ```toc_memory.json```
+    - ```QUERY``` 識別「我上次說了什麼...」指令，從記憶庫檢索相關內容並回答
 # **流程圖**
 ```mermaid 
 %%{
