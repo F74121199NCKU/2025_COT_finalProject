@@ -1,136 +1,143 @@
 """
-title: TOC Agent (Fail-safe Hybrid)
-author: NCKU Student
-description: FSM Agent with Hybrid Output (Auto-switch to Block mode if Stream fails).
+title: TOC Agent (Triple-Key Ultimate)
+author: NCKU Student & Gemini
+description: Optimized with 3 API Keys for perfect parallel processing.
 requirements: python-statemachine, requests, pydantic
-version: 4.0.0 (Stable)
+version: 8.1.0 (Triple Key)
 """
 
 import os
 import requests
 import json
 import datetime
+import time
+import concurrent.futures
 from typing import List, Union, Generator, Iterator
 from pydantic import BaseModel
 from statemachine import StateMachine, State
 
-# 紀錄當前對話的記憶(通常是旅遊)
 GLOBAL_USER_STATES = {}
 
-# 記憶系統 (Memory System)
+
+# ==========================================
+# 🔑 金鑰管理系統 (三 Key 完美輪詢)
+# ==========================================
+class KeyManager:
+    KEYS = [
+        "253b609e99624ea28f7f036e9d4d363b2ad71b853b3fd7b986b12be2b014ff69",
+        "ea00b6195cbab7342f1e99824c0d4808c087438d0061fb07b8ab39186b1db778",
+        "2ef233a5993082e09a4533e76c0e8cb2614388ea27cb35b25de9b4d91891a78e",  # 新增的第三組 Key
+    ]
+    _index = 0
+
+    @classmethod
+    def get_headers(cls):
+        # 輪詢邏輯：0 -> 1 -> 2 -> 0 ...
+        current_key = cls.KEYS[cls._index]
+        cls._index = (cls._index + 1) % len(cls.KEYS)
+        return {
+            "Authorization": f"Bearer {current_key}",
+            "Content-Type": "application/json",
+            "Connection": "keep-alive",
+        }
+
+
+# ==========================================
+# 🧠 記憶系統
+# ==========================================
 class MemorySystem:
-    # 設定日記本的存檔路徑 (相對路徑，避免 WebUI 找不到)
     FILE_PATH = "./toc_memory.json"
 
     @staticmethod
     def load_memory():
-        """讀取日記"""
-        if not os.path.exists(MemorySystem.FILE_PATH): return []
+        if not os.path.exists(MemorySystem.FILE_PATH):
+            return []
         try:
-            with open(MemorySystem.FILE_PATH, 'r', encoding='utf-8') as f: return json.load(f)
-        except: return []
+            with open(MemorySystem.FILE_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return []
 
     @staticmethod
     def save_memory(content: str):
-        """寫日記"""
         memories = MemorySystem.load_memory()
-
-        # 加上時間
-        entry = {"timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "content": content}
+        entry = {
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "content": content,
+        }
         memories.append(entry)
         try:
-            with open(MemorySystem.FILE_PATH, 'w', encoding='utf-8') as f:
+            with open(MemorySystem.FILE_PATH, "w", encoding="utf-8") as f:
                 json.dump(memories, f, ensure_ascii=False, indent=2)
             return f"✅ 已記錄：{content}"
-        except Exception as e: return f"❌ 寫入失敗：{e}"
+        except Exception as e:
+            return f"❌ 寫入失敗：{e}"
 
     @staticmethod
     def get_context_string():
-        """把最近的日記串成字串，讓 AI 閱讀"""
         memories = MemorySystem.load_memory()
-        if not memories: return "目前沒有任何記憶。"
-        # 只取最後 15 筆，避免塞爆 AI 的腦容量 (Token)
+        if not memories:
+            return "目前沒有任何記憶。"
         recent = memories[-15:]
         context = "【使用者的記憶庫】:\n"
-        for mem in recent: context += f"- [{mem['timestamp']}] {mem['content']}\n"
+        for mem in recent:
+            context += f"- [{mem['timestamp']}] {mem['content']}\n"
         return context
 
-# ==========================================
-# 🧠 記憶區 (Zone Memory)
-# ==========================================
+
 class ZoneMemory:
-    """ 負責處理記憶的存取邏輯 """
     @staticmethod
     def handle(action: str, content: str):
-        
-        # 情況 A: 寫日記 (SAVE)
         if action == "SAVE":
-            result = MemorySystem.save_memory(content)
-            yield result
-
-        # 情況 B: 問問題 (QUERY)
+            yield MemorySystem.save_memory(content)
         elif action == "QUERY":
-            # 先把日記拿出來
             context = MemorySystem.get_context_string()
-            
-            # 告訴 AI 如何根據日記回答
             prompt = (
-                f"You are a helpful assistant with access to the user's memory.\n"
-                f"Answer the question based ONLY on the provided memory context.\n"
-                f"If the answer is not in the memory, say '我記得的資料裡沒有提到這件事'.\n\n"
-                f"{context}\n\n"
-                f"User Question: {content}\n"
-                f"Answer:"
+                f"You are a helpful assistant with access to user memory.\n"
+                f"{context}\n\nUser Question: {content}\n"
+                f"If the answer is not in the memory, say '我記得的資料裡沒有提到這件事'.\nAnswer:"
             )
             yield from Tools._call_smart(prompt)
 
-# 基礎建設 (Tools)
+
+# ==========================================
+# 🧱 基礎建設
+# ==========================================
 class Tools:
     API_URL = "https://api-gateway.netdb.csie.ncku.edu.tw/api/chat"
-    API_KEY = "253b609e99624ea28f7f036e9d4d363b2ad71b853b3fd7b986b12be2b014ff69"
     MODEL_NAME = "gpt-oss:20b"
 
     @staticmethod
     def _call_stream_generator(
-        prompt: str, temperature: float = 0.7       #prompt: 輸入, temperature: 創意程度
+        prompt: str, temperature: float = 0.7
     ) -> Generator[str, None, None]:
-        """基礎串流產生器"""
+        response = None
         try:
-            #連線資訊
-            headers = {
-                "Authorization": f"Bearer {Tools.API_KEY}",
-                "Content-Type": "application/json",
-                "Connection": "close",
-            }
-
-            #Model回傳的設定
+            headers = KeyManager.get_headers()  # 自動輪詢 Key
             payload = {
                 "model": Tools.MODEL_NAME,
                 "messages": [{"role": "user", "content": prompt}],
-                "stream": True,                                     #有字產出就立刻回傳
-                "temperature": temperature,                         #
+                "stream": True,
+                "temperature": temperature,
                 "max_tokens": 1500,
             }
-
-            #送出資訊
             response = requests.post(
                 Tools.API_URL,
-                headers = headers,          #就是上面的headers
-                json = payload,             #也是上面的payload
-                stream = True,          
-                timeout = (10, 120),          #Timeout 設定：(連線, 讀取) 
+                headers=headers,
+                json=payload,
+                stream=True,
+                timeout=(5, 60),
             )
+            if response.status_code != 200:
+                return
 
-            if response.status_code != 200: #200: OK
-                return  
-
-            #讀取、解析字串
             for line in response.iter_lines():
                 if line:
                     decoded = line.decode("utf-8")
                     if decoded.startswith("data: "):
                         json_str = decoded.replace("data: ", "")
                         if json_str == "[DONE]":
+                            response.close()
                             break
                         try:
                             data = json.loads(json_str)
@@ -139,33 +146,20 @@ class Tools:
                                 .get("delta", {})
                                 .get("content", "")
                             )
-                            """
-                            示意圖
-                            {
-                                "choices": [
-                                    {
-                                    "delta": {
-                                        "content": "測試"  <--
-                                    }
-                                    }
-                                ]
-                            }
-                            """
                             if content:
                                 yield content
                         except:
                             pass
         except:
-            return
+            pass
+        finally:
+            if response:
+                response.close()
 
-    @staticmethod #一次讀取 
+    @staticmethod
     def _call_block(prompt: str, temperature: float = 0.7) -> str:
         try:
-            headers = {
-                "Authorization": f"Bearer {Tools.API_KEY}",
-                "Content-Type": "application/json",
-                "Connection": "close",
-            }
+            headers = KeyManager.get_headers()
             payload = {
                 "model": Tools.MODEL_NAME,
                 "messages": [{"role": "user", "content": prompt}],
@@ -173,35 +167,28 @@ class Tools:
                 "temperature": temperature,
             }
             res = requests.post(
-                Tools.API_URL, headers = headers, 
-                json = payload, timeout = 60
+                Tools.API_URL, headers=headers, json=payload, timeout=60
             )
             if res.status_code == 200:
                 return res.json().get("message", {}).get("content", "").strip()
-            return f"Error: API returned {res.status_code}"
+            return f"Error: {res.status_code}"
         except Exception as e:
             return f"Error: {e}"
 
     @staticmethod
-    #先後呼叫兩種方法
     def _call_smart(prompt: str) -> Generator[str, None, None]:
-
-        # 1. 先嘗試串流
         stream_gen = Tools._call_stream_generator(prompt)
         has_content = False
-
         try:
             for chunk in stream_gen:
                 has_content = True
                 yield chunk
         except:
-            pass  # 忽略串流錯誤，準備切換
+            pass
 
-        # 2. 如果串流沒反應，就切換到穩定模式
         if not has_content:
-            yield " (串流連線不穩，轉為穩定模式讀取...)\n\n"
-            block_content = Tools._call_block(prompt)
-            yield block_content
+            yield " (轉為穩定模式...)\n"
+            yield Tools._call_block(prompt)
 
     @staticmethod
     def analyze_intent_only(user_msg: str) -> str:
@@ -209,13 +196,16 @@ class Tools:
         🔥 第一步：只做分類 (Router) - 整合了您的安全網邏輯
         """
         msg = user_msg.strip()
-        
+
         # keyword快速判定
-        if any(k in msg for k in ["天氣", "氣溫"]): return "WEATHER"
-        if any(k in msg for k in ["記住", "紀錄"]): return "MEMORY_SAVE"
-        if any(k in msg for k in ["查詢", "回憶"]): return "MEMORY_QUERY"
-        
-        # LLM分類 
+        if any(k in msg for k in ["天氣", "氣溫", "預報"]):
+            return "WEATHER"
+        if any(k in msg for k in ["記住", "紀錄", "記憶"]):
+            return "MEMORY_SAVE"
+        if any(k in msg for k in ["查詢", "回憶", "搜索"]):
+            return "MEMORY_QUERY"
+
+        # LLM分類
         prompt = (
             f"Classify the user intent into one category.\n"
             f"Options: TRAVEL, WEATHER, MEMORY_SAVE, MEMORY_QUERY, TRASH\n"
@@ -229,35 +219,58 @@ class Tools:
             f"User: '{msg}'\nResult:"
         )
         res = Tools._call_block(prompt).strip()
-        
+
         # 防呆
         cmd_type = "TRASH"
         valid_intents = ["TRAVEL", "WEATHER", "MEMORY_SAVE", "MEMORY_QUERY", "TRASH"]
         for intent in valid_intents:
-            if intent in res: 
+            if intent in res:
                 cmd_type = intent
                 break
-            
-        # 安全網 
+
+        # 安全網
         if cmd_type == "TRASH":
-            #這些詞都可增刪
-            travel_keywords = ["旅遊", "旅行", "行程", "一日遊", "二日遊", "好玩", "日遊"]
-            exclude_words = ["去年", "過去", "失去", "去除", "回去", "下去", "上去", "進去", "出去"]
+            # 這些詞都可增刪
+            travel_keywords = [
+                "旅遊",
+                "旅行",
+                "行程",
+                "一日遊",
+                "二日遊",
+                "好玩",
+                "日遊",
+            ]
+            exclude_words = [
+                "去年",
+                "過去",
+                "失去",
+                "去除",
+                "回去",
+                "下去",
+                "上去",
+                "進去",
+                "出去",
+            ]
 
             has_travel_keyword = any(k in msg for k in travel_keywords)
             has_valid_go = "去" in msg and not any(bad in msg for bad in exclude_words)
 
             if has_travel_keyword:
                 return "TRAVEL"
-                
+
             elif has_valid_go:
                 # 檢查 "去" 的用法
                 try:
                     idx = msg.index("去")
                     # 確保 "去" 不是最後一個字，且後面接的不是符號
                     if idx < len(msg) - 1:
-                        suffix = msg[idx+1:].strip()
-                        if len(suffix) >= 2 and suffix[0] not in ["，", "。", "！", "?"]:
+                        suffix = msg[idx + 1 :].strip()
+                        if len(suffix) >= 2 and suffix[0] not in [
+                            "，",
+                            "。",
+                            "！",
+                            "?",
+                        ]:
                             return "TRAVEL"
                 except:
                     pass
@@ -266,120 +279,170 @@ class Tools:
 
     @staticmethod
     def extract_travel_info(msg: str, current_data: dict) -> dict:
-        """
-        旅遊專用提取器 (Extractor)
-        只在確定是 TRAVEL 時呼叫，專注抓地點和日期。
-        """
         prompt = (
-            f"You are a Travel Assistant. extract information from User Input.\n"
-            f"Current known info: {current_data}\n"
-            f"User Input: '{msg}'\n\n"
-            f"Task: Extract 'dest' (Destination) and 'date' (Date).\n"
-            f"Rules:\n"
-            f"1. If user mentions a new destination, update 'dest'.\n"
-            f"2. If user mentions a time/date, update 'date'.\n"
-            f"3. If info is not mentioned, keep it null.\n"
-            f"4. Output format: JSON {{ \"dest\": \"...\", \"date\": \"...\" }}\n"
-            f"JSON:"
+            f"Extract 'dest' and 'date' JSON from: '{msg}'\n"
+            f"Current: {current_data}\nJSON:"
         )
         res = Tools._call_block(prompt)
         try:
-            #抓取JSON部分 並回傳dict
+            start, end = res.find("{"), res.rfind("}") + 1
+            if start != -1:
+                return json.loads(res[start:end])
+        except:
+            pass
+        return {}
+
+    @staticmethod
+    def extract_weather_info(msg: str) -> dict:
+        """
+        ☁️ 升級版：天氣資訊提取器
+        同時抓取「地點」與「日期 (YYYY-MM-DD)」。
+        """
+        # 取得今天的日期，讓 AI 有參考座標
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        
+        prompt = (
+            f"Extract City and Date from user input.\n"
+            f"Current Date: {today}\n"
+            f"User Input: '{msg}'\n\n"
+            f"Rules:\n"
+            f"1. City: Translate to English if possible (e.g. '台南'->'Tainan').\n"
+            f"2. Date: Convert to 'YYYY-MM-DD'.\n"
+            f"   - '明天' -> Calculate based on Current Date.\n"
+            f"   - '今天', '現在', 'Now' -> Return 'today'.\n"
+            f"   - If no date is mentioned -> Return 'today'.\n"
+            f"3. Output JSON: {{ \"city\": \"...\", \"date\": \"...\" }}\n"
+            f"JSON:"
+        )
+        res = Tools._call_block(prompt).strip()
+        try:
             start = res.find('{')
             end = res.rfind('}') + 1
             if start != -1 and end != -1:
                 return json.loads(res[start:end])
         except: pass
-        return {}
+        return {"city": None, "date": "today"}
 
     @staticmethod
-    def extract_city(msg: str) -> str:
-        """
-        從句子中抓出城市名稱，確保 get_weather 能查到資料。
-        """
-        prompt = (
-            f"Extract the city name from the user input.\n"
-            f"Input: '{msg}'\n"
-            f"Rules:\n"
-            f"1. Output ONLY the city name (e.g., 'Taipei', 'Tainan', 'London').\n"
-            f"2. If no city is found, output 'None'.\n"
-            f"Result:"
-        )
-        # 使用穩定版 (Block) 讀取，因為我們只需要一個詞
-        return Tools._call_block(prompt).strip()
-
-    @staticmethod
-    def get_weather(city: str) -> str:
+    def get_weather(city: str, target_date: str = "today") -> str:
         try:
             headers = {"User-Agent": "Mozilla/5.0"}
-            
+
             # 1. 查座標 (這段沒變)
             geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&format=json"
-            geo = requests.get(geo_url, headers=headers, timeout=10).json()
-            
-            if "results" not in geo:
-                return f"找不到 '{city}'"
-            
+            geo = requests.get(geo_url, headers=headers, timeout=5).json()
+            if "results" not in geo: return f"找不到 '{city}'"
             loc = geo["results"][0]
-            lat = loc['latitude']
-            lng = loc['longitude']
+            lat, lng = loc["latitude"], loc["longitude"]
 
-            # 2. 查詳細天氣 (🔥 這裡改了！我們多要了很多資料)
-            # current 參數指定了我們要：氣溫、相對濕度、體感溫度、天氣代碼、風速
-            weather_url = (
-                f"https://api.open-meteo.com/v1/forecast?"
-                f"latitude={lat}&longitude={lng}&"
-                f"current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&"
-                f"timezone=auto"
-            )
-            w = requests.get(weather_url, headers=headers, timeout=10).json()
+            # ==========================================
+            # 📅 日期檢查防呆 (新增的部分！)
+            # ==========================================
+            if target_date != "today":
+                try:
+                    # 把文字日期 (2026-01-02) 轉成電腦時間物件
+                    target_dt = datetime.datetime.strptime(target_date, "%Y-%m-%d").date()
+                    today_dt = datetime.datetime.now().date()
+                    
+                    # 計算差距天數
+                    delta_days = (target_dt - today_dt).days
+
+                    # 防呆 1: 查過去
+                    if delta_days < 0:
+                        return f"❌ 無法查詢過去的天氣 ({target_date})，時光機尚未發明。"
+                    
+                    # 防呆 2: 查太遠 (Open-Meteo 免費版限制約 14-16 天)
+                    if delta_days > 14:
+                        return f"❌ 預報太遠了 ({target_date})！我只能查詢未來 14 天內的天氣。"
+                
+                except ValueError:
+                    # 如果日期格式怪怪的，就當作沒事繼續試試看
+                    pass
+
+            # ==========================================
+            # 🌤️ 查詢邏輯 (保持原本架構)
+            # ==========================================
             
-            # 3. 解析資料
-            current = w.get("current", {})
-            temp = current.get("temperature_2m", "N/A")          # 氣溫
-            feel = current.get("apparent_temperature", "N/A")    # 體感
-            humid = current.get("relative_humidity_2m", "N/A")   # 濕度
-            wind = current.get("wind_speed_10m", "N/A")          # 風速
-            code = current.get("weather_code", 0)                # 天氣代碼 (數字)
+            # 情況 A: 查現在/今天
+            if target_date == "today":
+                weather_url = (
+                    f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lng}&"
+                    f"current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&"
+                    f"timezone=auto"
+                )
+                data = requests.get(weather_url, headers=headers, timeout=5).json()
+                current = data.get("current", {})
+                
+                temp = current.get("temperature_2m", "N/A")
+                feel = current.get("apparent_temperature", "N/A")
+                humid = current.get("relative_humidity_2m", "N/A")
+                code = current.get("weather_code", 0)
+                status = Tools._get_weather_status(code)
 
-            # 4. 翻譯天氣代碼 (把數字變文字)
-            status = "晴朗 ☀️"
-            if 1 <= code <= 3: status = "多雲 ☁️"
-            elif code in [45, 48]: status = "有霧 🌫️"
-            elif 51 <= code <= 67: status = "下雨 🌧️"
-            elif 71 <= code <= 77: status = "下雪 ❄️"
-            elif 80 <= code <= 82: status = "陣雨 🌦️"
-            elif code >= 95: status = "雷雨 ⛈️"
+                return (
+                    f"📍 **{loc['name']} 即時天氣**\n"
+                    f"☁️ 概況: {status}\n"
+                    f"🌡️ 氣溫: {temp}°C (體感 {feel}°C)\n"
+                    f"💧 濕度: {humid}%\n"
+                )
 
-            # 5. 組裝漂亮的回報單
-            report = (
-                f"📍 **{loc['name']} 天氣報告**\n"
-                f"☁️ 概況: {status}\n"
-                f"🌡️ 氣溫: {temp}°C (體感 {feel}°C)\n"
-                f"💧 濕度: {humid}%\n"
-                f"💨 風速: {wind} km/h"
-            )
-            return report
+            # 情況 B: 查特定日期
+            else:
+                weather_url = (
+                    f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lng}&"
+                    f"daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&"
+                    f"start_date={target_date}&end_date={target_date}&"
+                    f"timezone=auto"
+                )
+                data = requests.get(weather_url, headers=headers, timeout=5).json()
+                
+                # 這裡也要防呆：如果 API 沒回傳 daily 資料，代表真的查不到
+                if "daily" not in data or not data["daily"]["time"]:
+                    return f"❌ 氣象局資料庫沒有 {target_date} 的資料。"
+
+                daily = data["daily"]
+                max_temp = daily["temperature_2m_max"][0]
+                min_temp = daily["temperature_2m_min"][0]
+                rain_prob = daily["precipitation_probability_max"][0]
+                code = daily["weather_code"][0]
+                status = Tools._get_weather_status(code)
+
+                return (
+                    f"🗓️ **{loc['name']} 天氣預報 ({target_date})**\n"
+                    f"☁️ 概況: {status}\n"
+                    f"🌡️ 氣溫: {min_temp}°C ~ {max_temp}°C\n"
+                    f"☔ 降雨機率: {rain_prob}%"
+                )
 
         except Exception as e:
-            return f"天氣查詢失敗: {e}"
+            return f"查詢失敗: {e}"
+    
+    @staticmethod
+    def _get_weather_status(code: int) -> str:
+        """小幫手：把數字轉文字"""
+        if code == 0: return "晴朗 ☀️"
+        if 1 <= code <= 3: return "多雲 ☁️"
+        if code in [45, 48]: return "有霧 🌫️"
+        if 51 <= code <= 67: return "下雨 🌧️"
+        if 71 <= code <= 77: return "下雪 ❄️"
+        if 80 <= code <= 82: return "陣雨 🌦️"
+        if code >= 95: return "雷雨 ⛈️"
+        return "未知"
 
-
-# 旅遊 FSM
+# ==========================================
+# 🗺️ 旅遊 FSM (維持高效能平行 + 心跳)
+# ==========================================
 class ZoneTravel(StateMachine):
-    #定義狀態
-    idle = State("idle", value = "idle", initial = True)
-    collecting_dest = State("collecting_dest", value = "collecting_dest")
-    collecting_date = State("collecting_date", value = "collecting_date")
-    processing = State("processing", value = "processing")
+    idle = State("idle", value="idle", initial=True)
+    collecting_dest = State("collecting_dest", value="collecting_dest")
+    collecting_date = State("collecting_date", value="collecting_date")
+    processing = State("processing", value="processing")
 
-    #狀態轉換
     start_plan = idle.to(collecting_dest)
     got_dest = collecting_dest.to(collecting_date)
     got_date = collecting_date.to(processing)
     finish = processing.to(idle)
 
-    #返回IDLE
     def safe_reset(self):
         if self.current_state != self.idle:
             self.current_state = self.idle
@@ -387,8 +450,7 @@ class ZoneTravel(StateMachine):
     def __init__(self):
         self.trip_data = {"dest": None, "date": None}
         super().__init__()
-    
-    #on_enter_狀態名 進入該狀態後會自動執行
+
     def on_enter_collecting_dest(self):
         yield "👋 旅遊模式啟動！請問想去哪裡玩？"
 
@@ -399,16 +461,41 @@ class ZoneTravel(StateMachine):
     def on_enter_processing(self):
         dest = self.trip_data["dest"]
         date = self.trip_data["date"]
-        # 🔥 先確認收到指令
-        yield f"✅ 日期：{date}\n🚀 正在為您規劃 {dest} 的行程...\n\n"
+        yield f"✅ 日期：{date}\n🚀 正在**平行運算**為您規劃 {dest} 的行程...\n"
 
-        # 🔥 使用雙重保險呼叫
-        yield from Tools._call_smart(
-            f"請為我去 {dest} 規劃一日遊，日期 {date}。繁體中文，附景點推薦。"
-        )
+        p1 = f"請只規劃 {date} 去 {dest} 的『上午』行程。簡單推薦1-2個景點與特色早餐。請用繁體中文。"
+        p2 = f"請只規劃 {date} 去 {dest} 的『午餐與下午』行程。推薦特色午餐與午後景點。請用繁體中文。"
+        p3 = f"請只規劃 {date} 去 {dest} 的『晚餐與晚上』行程。推薦夜市或夜景。請用繁體中文。"
+
+        def wait_with_heartbeat(future):
+            while not future.done():
+                time.sleep(0.5)
+                yield " ."  # 心跳機制：每 0.5 秒發送訊號防止斷線
+            yield "\n"
+            yield future.result()
+
+        # 🔥 因為現在有 3 個 Key，剛好對應這裡的 3 個 Workers
+        # 每個執行緒都會分配到一個獨立的 Key，效率最大化！
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            f1 = executor.submit(Tools._call_block, p1)
+            f2 = executor.submit(Tools._call_block, p2)
+            f3 = executor.submit(Tools._call_block, p3)
+
+            yield "\n### 🌅 上午行程\n"
+            yield from wait_with_heartbeat(f1)
+
+            yield "\n\n### ☀️ 下午行程\n"
+            yield from wait_with_heartbeat(f2)
+
+            yield "\n\n### 🌙 晚上行程\n"
+            yield from wait_with_heartbeat(f3)
+
+        yield "\n\n🎉 規劃完成！祝您旅途愉快！"
 
 
-# 核心 (Pipe)
+# ==========================================
+# 🎛️ 核心 (Pipe)
+# ==========================================
 class Pipe:
     class Valves(BaseModel):
         pass
@@ -416,111 +503,100 @@ class Pipe:
     def __init__(self):
         self.type = "manifold"
         self.id = "toc_agent"
-        self.name = "TOC Agent (Smart)"
+        self.name = "TOC Agent (Triple Key)"
 
     def pipe(self, body: dict) -> Union[str, Generator, Iterator]:
         try:
-            # 接收訊息
             msg = body.get("messages", [])[-1].get("content", "").strip()
             user_id = body.get("user", {}).get("id", "default_user")
 
-            yield "Wait...\n"
+            yield "Wait...\n\n"
+            yield "🤔 正在讀取訊息...\n"
 
-            # 分析指令
             intent_type = Tools.analyze_intent_only(msg)
-            
-            # 查詢記憶
             fsm = ZoneTravel()
+
             if user_id in GLOBAL_USER_STATES:
                 saved = GLOBAL_USER_STATES[user_id]
                 fsm.trip_data = saved["data"]
-
-                # 強制切換回上次的狀態
                 for s in fsm.states:
                     if s.name == saved["state"]:
                         fsm.current_state = s
                         break
-            
-            # 旅遊邏輯 (State-Aware Logic)
-            
-            # 判斷是否要處理旅遊 (包含新指令 TRAVEL 或 正在旅遊狀態中)
-            is_travel_active = (fsm.current_state != fsm.idle)
-            is_new_travel = (intent_type == "TRAVEL")
+
+            is_travel_active = fsm.current_state != fsm.idle
+            is_new_travel = intent_type == "TRAVEL"
 
             if is_travel_active or is_new_travel:
-                # 處理取消指令
-                if msg.lower() in ["取消", "退出", "reset", "結束", "中止"]:
+                if msg.lower() in ["取消", "退出", "reset"]:
                     fsm.safe_reset()
-                    if user_id in GLOBAL_USER_STATES: del GLOBAL_USER_STATES[user_id]
+                    if user_id in GLOBAL_USER_STATES:
+                        del GLOBAL_USER_STATES[user_id]
                     yield "🛑 已重置。"
                     return
 
-                # 如果是新任務，重置 FSM 開始
                 if is_new_travel and not is_travel_active:
                     fsm.start_plan()
-                
-                # 呼叫二樓專員 (Extractor) - 專心抓資料
-                extracted = Tools.extract_travel_info(msg, fsm.trip_data)
-                
-                # 更新資料 (如果有抓到的話)
-                if extracted.get("dest"): fsm.trip_data["dest"] = extracted["dest"]
-                if extracted.get("date"): fsm.trip_data["date"] = extracted["date"]
 
-                # 狀態跳轉邏輯 (資料驅動)
-                # 看資料缺什麼就問什麼
-                
-                # 缺地點
+                yield "🔍 分析旅遊資訊中...\n"
+                extracted = Tools.extract_travel_info(msg, fsm.trip_data)
+
+                if extracted.get("dest"):
+                    fsm.trip_data["dest"] = extracted["dest"]
+                if extracted.get("date"):
+                    fsm.trip_data["date"] = extracted["date"]
+
                 if not fsm.trip_data["dest"]:
-                    fsm.current_state = fsm.collecting_dest # 手動對齊狀態
-                    GLOBAL_USER_STATES[user_id] = {"state": "collecting_dest", "data": fsm.trip_data}
+                    fsm.current_state = fsm.collecting_dest
+                    GLOBAL_USER_STATES[user_id] = {
+                        "state": "collecting_dest",
+                        "data": fsm.trip_data,
+                    }
                     yield "👋 旅遊模式：請問想去 **哪裡** 玩？"
-                
-                # 缺日期
+
                 elif not fsm.trip_data["date"]:
                     fsm.current_state = fsm.collecting_date
-                    GLOBAL_USER_STATES[user_id] = {"state": "collecting_date", "data": fsm.trip_data}
+                    GLOBAL_USER_STATES[user_id] = {
+                        "state": "collecting_date",
+                        "data": fsm.trip_data,
+                    }
                     dest = fsm.trip_data["dest"]
                     yield f"✅ 目的地：**{dest}**。\n請問 **什麼時候** 出發？"
-                
-                # 資料都齊了
+
                 else:
                     fsm.current_state = fsm.processing
                     yield from fsm.on_enter_processing()
-                    fsm.finish() # 完成後重置
-                    if user_id in GLOBAL_USER_STATES: del GLOBAL_USER_STATES[user_id]
-                
+                    fsm.finish()
+                    if user_id in GLOBAL_USER_STATES:
+                        del GLOBAL_USER_STATES[user_id]
                 return
-            
-            # 其他功能 (天氣 / 記憶 / 閒聊)
-            if intent_type == "WEATHER":
-                yield "☁️ 分析地名中...\n"
-                
-                # 先抓出乾淨的地名
-                city = Tools.extract_city(msg)
-                
-                if city and city != "None":
-                    yield f"🔍 正在查詢 **{city}** 的天氣...\n"
-                    # 2. 真正呼叫 Python 爬蟲函式
-                    weather_report = Tools.get_weather(city)
-                    yield weather_report
-                else:
-                    yield "⚠️ 找不到城市名稱，請試著說簡短一點，例如：「台北天氣」。"
-            
-            # 處理儲存記憶
-            elif intent_type == "MEMORY_SAVE":
-                yield "💾 正在寫入日記...\n"
-                # 呼叫記憶區 (ZoneMemory) 的 handle 函式
-                # 這裡直接把整句話 (msg) 存進去
-                yield from ZoneMemory.handle("SAVE", msg)
 
-            # 處理查詢記憶
+            # 處理天氣
+            if intent_type == "WEATHER":
+                yield "☁️ 分析天氣需求中...\n"
+                
+                # 1. 呼叫新的提取器 (抓地點 + 日期)
+                info = Tools.extract_weather_info(msg)
+                city = info.get("city")
+                date = info.get("date")
+
+                if city and city != "None":
+                    # 顯示一點提示訊息，讓使用者知道我們有聽懂日期
+                    date_display = "現在" if date == "today" else date
+                    yield f"🔍 正在查詢 **{city}** - **{date_display}** 的天氣...\n"
+                    
+                    # 2. 呼叫新的查詢函式
+                    report = Tools.get_weather(city, date)
+                    yield report
+                else:
+                    yield "⚠️ 找不到城市名稱，請再試一次 (例如：台北明天的天氣)。"
+            elif intent_type == "MEMORY_SAVE":
+                yield "💾 寫入中...\n"
+                yield from ZoneMemory.handle("SAVE", msg)
             elif intent_type == "MEMORY_QUERY":
-                yield "🧠 正在搜尋記憶庫...\n"
-                # 呼叫記憶區幫忙回想
+                yield "🧠 搜尋中...\n"
                 yield from ZoneMemory.handle("QUERY", msg)
-            
             else:
-                # TRASH 或其他
                 yield from Tools._call_smart(f"User: {msg}\nReply:")
 
         except Exception as e:
