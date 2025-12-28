@@ -1,17 +1,67 @@
-docker pull ghcr.io/open-webui/open-webui:main  #下載docker image
-#啟動與連結伺服器 --name後名字可自改
+# 🛠️ 專案環境設置指南 (Environment Setup)
+
+本文件說明如何部署 Open WebUI、設定 ngrok 外部連線，以及管理 Docker Pipelines。
+
+## 1. 部署 Open WebUI
+
+使用 Docker 下載並啟動 Open WebUI 服務。
+
+### 步驟 1：下載 Docker Image
+
+從 GitHub Container Registry 下載最新版本的映像檔。
+
+```
+docker pull ghcr.io/open-webui/open-webui:main
+```
+
+### 步驟 2：啟動容器
+
+啟動並連結伺服器（Container 名稱設定為 `COT_AI`）。
+
+```
 docker run -d -p 3000:8080 -v open-webui:/app/backend/data --name COT_AI ghcr.io/open-webui/open-webui:main
+```
 
-__開啟localhost__
+> [!TIP] 參數說明
+> 
+> - `-d`: 在背景執行 (Detached mode)。
+>     
+> - `-p 3000:8080`: 將本機的 3000 port 對應到容器的 8080 port。
+>     
+> - `-v`: 掛載 Volume 以保存資料。
+>     
+> - `--name`: 自訂容器名稱（此處為 `COT_AI`，可自行修改）。
+>     
+
+---
+
+## 2. 設定外部連線 (ngrok)
+
+使用 ngrok 將本機服務暴露至外部網路，以便進行測試或展示。
+
+### 步驟 1：設定 Authtoken
+
+請將 `(YOUR ID)` 替換為您的 ngrok 驗證碼。
+
+```
 ngrok config add-authtoken (YOUR ID)
-ngrok http 3000
-複製 Forwarding後的網址即可
+```
 
-架設docker_pipelines
-docker-compose restart pipelines
-docker-compose down
-docker-compose up -d    (需等待下載時間)
-docker-compose down
+### 步驟 2：啟動通道
+
+將 port 3000 開放至外部。
+
+```
+ngrok http 3000
+```
+
+### 步驟 3：取得網址
+
+執行後，複製終端機顯示的 `Forwarding` 網址（例如 `https://xxxx.ngrok-free.app`），即可在瀏覽器開啟。
+
+---
+
+
 
 # **流程圖**
 ```mermaid 
