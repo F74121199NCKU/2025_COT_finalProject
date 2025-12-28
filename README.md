@@ -71,9 +71,9 @@ ngrok http 3000
 本專案是一個基於**OpenWebUI Pipe** 架構開發的AI Agent，整合了 **NCKU LLM API**、**氣象服務** 與 **旅遊行程規劃**。
 
 ## 三大功能：
-  🌥️天氣查詢<br>
-  🧠記憶系統<br>
-  🗺️旅遊規劃<br>
+  - 🌥️天氣查詢<br>
+  - 🧠記憶系統<br>
+  - 🗺️旅遊規劃<br>
 
 ## 📂 檔案結構
 ```
@@ -85,7 +85,7 @@ ngrok http 3000
 
 ## 功能特色
   🔑 三組API Key輪詢<br>
-    * 自動在 3 組 API Key 之間切換，大幅降低 ```Too Many Requests``` 的風險
+    - 自動在 3 組 API Key 之間切換，大幅降低 ```Too Many Requests``` 的風險
 # **流程圖**
 ```mermaid 
 %%{
