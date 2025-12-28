@@ -81,83 +81,92 @@ ngrok http 3000
 
 graph TD
     %% ==========================================
-    %% 🎨 樣式定義區 (高對比配色)
+    %% 🎨 樣式定義區
     %% ==========================================
-    %% start: 起點 - 亮粉紅邊框 + 白字
     classDef start fill:#331133,stroke:#ff79c6,stroke-width:3px,color:#fff;
-    
-    %% router: 判斷點 - 亮藍虛線 + 白字
-    classDef router fill:#0d1117,stroke:#38bdf8,stroke-width:2px,stroke-dasharray: 5 5,color:#fff;
-    
-    %% process: 一般處理 - 深灰底 + 亮綠邊框 + 白字
+    classDef logic fill:#0d1117,stroke:#38bdf8,stroke-width:2px,stroke-dasharray: 5 5,color:#fff;
     classDef process fill:#161b22,stroke:#50fa7b,stroke-width:2px,color:#fff;
-    
-    %% fsm: 狀態機 - 深橘底 + 亮橘邊框 + 白字
     classDef fsm fill:#2a1a00,stroke:#ffb86c,stroke-width:2px,color:#fff;
-    
-    %% api: 外部呼叫/LLM - 深紫底 + 亮紫邊框 + 白字
     classDef api fill:#1a0f2e,stroke:#bd93f9,stroke-width:2px,color:#fff;
+    classDef optimization fill:#003366,stroke:#00ccff,stroke-width:2px,color:#fff,stroke-dasharray: 2 2;
 
     %% ==========================================
-    %% 🔗 流程邏輯區 (完全不用動)
+    %% 🔗 系統主流程
     %% ==========================================
     User([使用者輸入]) --> Pipe[Pipe.pipe]:::start
-    Pipe --> Analyze[Tools.analyze_intent_only]:::router
     
-    Analyze -->|TRAVEL| CheckState{是否有未完成<br>旅遊狀態?}:::fsm
-    Analyze -->|WEATHER| WeatherProc[天氣處理]:::process
-    Analyze -->|MEMORY_SAVE| MemSave[ZoneMemory.handle 'SAVE']:::process
-    Analyze -->|MEMORY_QUERY| MemQuery[ZoneMemory.handle 'QUERY']:::process
-    Analyze -->|TRASH / OTHER| GeneralChat[一般閒聊]:::process
+    %% 1. FSM 狀態檢查
+    Pipe --> CheckActive{"FSM<br>進行中?"}:::logic
+    
+    CheckActive -- "Yes (State Found)" --> Restore["恢復狀態 & 設定 Intent=TRAVEL"]:::fsm
+    
+    %% 2. 意圖判斷
+    CheckActive -- No --> KeywordCheck{"關鍵字<br>光速判斷?"}:::optimization
+    
+    KeywordCheck -- "命中 (天氣/記憶/旅遊)" --> SetIntent[鎖定 Intent]:::process
+    KeywordCheck -- 無命中 --> LLM_Classify[LLM 意圖分類]:::api
+    
+    Restore --> Router((分流))
+    SetIntent --> Router
+    LLM_Classify --> Router
 
-    subgraph Travel_FSM [旅遊狀態機 ZoneTravel]
+    %% ==========================================
+    %% 🏖️ 旅遊 FSM
+    %% ==========================================
+    subgraph Travel_System [✈️ 旅遊規劃系統 ZoneTravel]
         direction TB
-        style Travel_FSM fill:#161b22,stroke:#ffb86c,stroke-width:2px,color:#fff
+        style Travel_System fill:#161b22,stroke:#ffb86c,stroke-width:2px,color:#fff
         
-        CheckState -- No --> StartPlan[FSM: start_plan]
-        CheckState -- Yes --> RestoreState[恢復狀態: collecting_dest/date]
+        Router -->|TRAVEL| LocalParse["try_local_parse<br>本地極速解析"]:::optimization
+        LocalParse --> LLM_Extract[LLM 提取補強]:::api
         
-        StartPlan --> Extract1[提取地點 & 日期]
-        RestoreState --> Extract1
+        LLM_Extract --> CheckData{資料檢查}:::fsm
         
-        Extract1 --> CheckData{資料齊全?}
-        CheckData -- No (缺地點) --> StateDest[State: collecting_dest]
-        CheckData -- No (缺日期) --> StateDate[State: collecting_date]
+        %% 狀態分支
+        CheckData -- 缺地點 --> StateDest["State: collecting_dest<br>問: 去哪裡?"]:::fsm
+        CheckData -- 缺日期 --> StateDate["State: collecting_date<br>問: 何時去?"]:::fsm
+        CheckData -- "缺天數 (New!)" --> StateDuration["State: collecting_duration<br>問: 玩幾天?"]:::fsm
         
-        StateDest --> AskDest[問: 想去哪?]
-        StateDate --> AskDate[問: 何時去?]
+        %% 處理中
+        CheckData -- 資料齊全 --> Processing["State: processing"]:::fsm
         
-        CheckData -- Yes --> StateProc[State: processing]
-        StateProc --> Parallel[平行處理]
+        %% 🔥 修正點：加上引號避免括號解析錯誤
+        Processing --> Parallel["平行處理 (ThreadPool)"]:::process
         
-        Parallel -->|Thread 1| PlanMorning[規劃上午行程]:::api
-        Parallel -->|Thread 2| PlanAfternoon[規劃下午行程]:::api
-        Parallel -->|Thread 3| PlanNight[規劃晚上行程]:::api
+        Parallel -->|Thread 1| PlanMorning[上午行程]:::api
+        Parallel -->|Thread 2| PlanAfternoon[下午行程]:::api
+        Parallel -->|Thread 3| PlanNight[晚上行程]:::api
         
-        PlanMorning & PlanAfternoon & PlanNight --> Combine[合併結果]
-        Combine --> Finish[FSM: finish / 重置]
+        PlanMorning & PlanAfternoon & PlanNight --> Combine[合併 & 生成回應]
     end
 
-    subgraph Weather_System [天氣系統]
+    %% ==========================================
+    %% ☁️ 天氣系統
+    %% ==========================================
+    subgraph Weather_System [☁️ 天氣系統]
         style Weather_System fill:#161b22,stroke:#50fa7b,stroke-width:2px,color:#fff
-        WeatherProc --> ExtractWeather[提取城市 & 日期]
-        ExtractWeather --> CheckDate{檢查日期}
-        CheckDate -- "是今天 (today)" --> API_Current[Open-Meteo Current API]:::api
-        CheckDate -- "是未來 (forecast)" --> API_Daily[Open-Meteo Daily API]:::api
-        API_Current & API_Daily --> WeatherReport[回傳天氣報告]
+        Router -->|WEATHER| ExtractWx[提取城市 & 日期]:::process
+        ExtractWx --> API_Meteo[Open-Meteo API]:::api
+        API_Meteo --> WxReport[回傳報告]
     end
 
-    subgraph Memory_System [記憶系統]
-        style Memory_System fill:#161b22,stroke:#50fa7b,stroke-width:2px,color:#fff
-        MemSave --> SaveFile[(寫入 JSON)]:::api
-        MemQuery --> LoadFile[(讀取 JSON)]:::api
-        LoadFile --> LLM_RAG[LLM 生成回答]:::api
+    %% ==========================================
+    %% 🧠 記憶與其他
+    %% ==========================================
+    subgraph Memory_System [🧠 記憶系統]
+        style Memory_System fill:#161b22,stroke:#bd93f9,stroke-width:2px,color:#fff
+        Router -->|MEMORY_SAVE| MemSave[寫入 JSON]:::api
+        Router -->|MEMORY_QUERY| MemQuery[讀取 JSON + RAG]:::api
     end
 
-    GeneralChat --> LLM_Chat[LLM 一般對話]:::api
+    Router -->|TRASH| Chat[一般閒聊]:::api
 
-    AskDest & AskDate & Finish & WeatherReport & SaveFile & LLM_RAG & LLM_Chat --> Response([回傳給使用者])
+    %% ==========================================
+    %% 輸出與資源管理
+    %% ==========================================
+    StateDest & StateDate & StateDuration & Combine & WxReport & MemSave & MemQuery & Chat --> Response([回傳給使用者]):::start
     style Response fill:#331133,stroke:#ff79c6,stroke-width:3px,color:#fff
 
-    KeyManager[KeyManager: 三 Key 輪詢] -.->|提供 Headers| PlanMorning & PlanAfternoon & PlanNight & LLM_Chat & LLM_RAG
+    %% Key Manager
+    KeyManager[KeyManager: 三 Key 輪詢] -.->|Authorization| PlanMorning & PlanAfternoon & PlanNight & LLM_Classify & Chat & MemQuery
     style KeyManager fill:#000,stroke:#fff,stroke-dasharray: 5 5,color:#fff
