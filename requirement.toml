@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toc-agent"
+version = "9.0.0"
+description = "Optimized with 3 API Keys for perfect parallel processing & Finite State Machine."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "NCKU Student & Gemini" }
+]
+keywords = ["agent", "fsm", "ncku", "llm", "openwebui"]
+
+dependencies = [
+    "requests",
+    "python-statemachine", 
+    "pydantic",
+]
