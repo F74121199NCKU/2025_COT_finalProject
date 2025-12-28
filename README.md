@@ -14,6 +14,7 @@ docker-compose up -d    (需等待下載時間)
 docker-compose down
 
 # **流程圖**
+```mermaid 
 graph TD
     %% 定義樣式
     classDef start fill:#f9f,stroke:#333,stroke-width:2px;
@@ -84,4 +85,3 @@ graph TD
     %% Key Manager 說明 (註解)
     KeyManager[KeyManager: 三 Key 輪詢] -.->|提供 Headers| PlanMorning & PlanAfternoon & PlanNight & LLM_Chat & LLM_RAG
     style KeyManager fill:#fff,stroke:#333,stroke-dasharray: 5 5
-    
