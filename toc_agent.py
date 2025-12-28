@@ -3,7 +3,7 @@ title: TOC Agent (Triple-Key Ultimate)
 author: NCKU Student & Gemini
 description: Optimized with 3 API Keys for perfect parallel processing.
 requirements: python-statemachine, requests, pydantic
-version: 8.1.0 (Triple Key)
+version: 9.0.0 (Instant Intent Reflex)
 """
 
 import os
@@ -11,6 +11,7 @@ import requests
 import json
 import datetime
 import time
+import re
 import concurrent.futures
 from typing import List, Union, Generator, Iterator
 from pydantic import BaseModel
@@ -26,13 +27,12 @@ class KeyManager:
     KEYS = [
         "253b609e99624ea28f7f036e9d4d363b2ad71b853b3fd7b986b12be2b014ff69",
         "ea00b6195cbab7342f1e99824c0d4808c087438d0061fb07b8ab39186b1db778",
-        "2ef233a5993082e09a4533e76c0e8cb2614388ea27cb35b25de9b4d91891a78e",  # 新增的第三組 Key
+        "2ef233a5993082e09a4533e76c0e8cb2614388ea27cb35b25de9b4d91891a78e",
     ]
     _index = 0
 
     @classmethod
     def get_headers(cls):
-        # 輪詢邏輯：0 -> 1 -> 2 -> 0 ...
         current_key = cls.KEYS[cls._index]
         cls._index = (cls._index + 1) % len(cls.KEYS)
         return {
@@ -113,7 +113,7 @@ class Tools:
     ) -> Generator[str, None, None]:
         response = None
         try:
-            headers = KeyManager.get_headers()  # 自動輪詢 Key
+            headers = KeyManager.get_headers()
             payload = {
                 "model": Tools.MODEL_NAME,
                 "messages": [{"role": "user", "content": prompt}],
@@ -126,7 +126,7 @@ class Tools:
                 headers=headers,
                 json=payload,
                 stream=True,
-                timeout=(5, 60),
+                timeout=(10, 180),
             )
             if response.status_code != 200:
                 return
@@ -167,7 +167,7 @@ class Tools:
                 "temperature": temperature,
             }
             res = requests.post(
-                Tools.API_URL, headers=headers, json=payload, timeout=60
+                Tools.API_URL, headers=headers, json=payload, timeout=180
             )
             if res.status_code == 200:
                 return res.json().get("message", {}).get("content", "").strip()
@@ -193,11 +193,12 @@ class Tools:
     @staticmethod
     def analyze_intent_only(user_msg: str) -> str:
         """
-        🔥 第一步：只做分類 (Router) - 整合了您的安全網邏輯
+        🚀 v9.0 關鍵優化：先用 Keyword 判斷，沒結果才問 LLM。
+        這能讓「我想去...」這類開頭直接跳過一次 API 呼叫。
         """
         msg = user_msg.strip()
 
-        # keyword快速判定
+        # 1. 光速關鍵字判斷 (優先於 LLM)
         if any(k in msg for k in ["天氣", "氣溫", "預報"]):
             return "WEATHER"
         if any(k in msg for k in ["記住", "紀錄", "記憶"]):
@@ -205,7 +206,38 @@ class Tools:
         if any(k in msg for k in ["查詢", "回憶", "搜索"]):
             return "MEMORY_QUERY"
 
-        # LLM分類
+        # 旅遊關鍵字神經反射
+        travel_keywords = ["旅遊", "旅行", "行程", "一日遊", "二日遊", "好玩", "日遊"]
+        exclude_words = [
+            "去年",
+            "過去",
+            "失去",
+            "去除",
+            "回去",
+            "下去",
+            "上去",
+            "進去",
+            "出去",
+        ]
+
+        has_travel_keyword = any(k in msg for k in travel_keywords)
+        # 判斷「去」的邏輯：排除不相關的詞，且後面要有接東西
+        has_valid_go = False
+        if "去" in msg and not any(bad in msg for bad in exclude_words):
+            try:
+                idx = msg.index("去")
+                if idx < len(msg) - 1:
+                    suffix = msg[idx + 1 :].strip()
+                    # 確保後面不是標點符號，且長度足夠 (避免 '去死' 等單字誤判)
+                    if len(suffix) >= 2 and suffix[0] not in ["，", "。", "！", "?"]:
+                        has_valid_go = True
+            except:
+                pass
+
+        if has_travel_keyword or has_valid_go:
+            return "TRAVEL"
+
+        # 2. 如果關鍵字看不出來，才問 LLM (兜底)
         prompt = (
             f"Classify the user intent into one category.\n"
             f"Options: TRAVEL, WEATHER, MEMORY_SAVE, MEMORY_QUERY, TRASH\n"
@@ -220,87 +252,94 @@ class Tools:
         )
         res = Tools._call_block(prompt).strip()
 
-        # 防呆
-        cmd_type = "TRASH"
         valid_intents = ["TRAVEL", "WEATHER", "MEMORY_SAVE", "MEMORY_QUERY", "TRASH"]
         for intent in valid_intents:
             if intent in res:
-                cmd_type = intent
+                return intent
+
+        return "TRASH"
+
+    @staticmethod
+    def try_local_parse(msg: str) -> dict:
+        """
+        ⚡ 光速解析 - 嚴格版
+        """
+        result = {}
+        msg_clean = msg.replace(" ", "")
+
+        today = datetime.datetime.now()
+        if "明天" in msg_clean:
+            result["date"] = (today + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        elif "後天" in msg_clean:
+            result["date"] = (today + datetime.timedelta(days=2)).strftime("%Y-%m-%d")
+        elif "今天" in msg_clean:
+            result["date"] = today.strftime("%Y-%m-%d")
+
+        # 2. 解析天數 (嚴格限制：必須有 '天')
+        digit_match = re.search(r"(\d+)\s*天", msg_clean)
+        if digit_match:
+            try:
+                val = int(digit_match.group(1))
+                if val < 30:
+                    result["duration"] = val
+            except:
+                pass
+
+        cn_map = {
+            "一": 1,
+            "二": 2,
+            "兩": 2,
+            "三": 3,
+            "四": 4,
+            "五": 5,
+            "六": 6,
+            "七": 7,
+            "八": 8,
+            "九": 9,
+            "十": 10,
+        }
+        for k, v in cn_map.items():
+            if (k + "天") in msg_clean:
+                result["duration"] = v
                 break
 
-        # 安全網
-        if cmd_type == "TRASH":
-            # 這些詞都可增刪
-            travel_keywords = [
-                "旅遊",
-                "旅行",
-                "行程",
-                "一日遊",
-                "二日遊",
-                "好玩",
-                "日遊",
-            ]
-            exclude_words = [
-                "去年",
-                "過去",
-                "失去",
-                "去除",
-                "回去",
-                "下去",
-                "上去",
-                "進去",
-                "出去",
-            ]
-
-            has_travel_keyword = any(k in msg for k in travel_keywords)
-            has_valid_go = "去" in msg and not any(bad in msg for bad in exclude_words)
-
-            if has_travel_keyword:
-                return "TRAVEL"
-
-            elif has_valid_go:
-                # 檢查 "去" 的用法
-                try:
-                    idx = msg.index("去")
-                    # 確保 "去" 不是最後一個字，且後面接的不是符號
-                    if idx < len(msg) - 1:
-                        suffix = msg[idx + 1 :].strip()
-                        if len(suffix) >= 2 and suffix[0] not in [
-                            "，",
-                            "。",
-                            "！",
-                            "?",
-                        ]:
-                            return "TRAVEL"
-                except:
-                    pass
-
-        return cmd_type
+        return result
 
     @staticmethod
     def extract_travel_info(msg: str, current_data: dict) -> dict:
+        local_res = Tools.try_local_parse(msg)
+
+        if current_data.get("date") and not current_data.get("duration"):
+            if "duration" in local_res:
+                return local_res
+
+        if current_data.get("dest") and not current_data.get("date"):
+            if "date" in local_res:
+                return local_res
+
         prompt = (
-            f"Extract 'dest' and 'date' JSON from: '{msg}'\n"
-            f"Current: {current_data}\nJSON:"
+            f"Extract 'dest', 'date', 'duration' (int or null) JSON from: '{msg}'\n"
+            f"Current Data: {current_data}\n"
+            f"Rule: If duration is not explicitly mentioned (like '3 days'), value must be null.\n"
+            f"JSON:"
         )
         res = Tools._call_block(prompt)
         try:
             start, end = res.find("{"), res.rfind("}") + 1
             if start != -1:
-                return json.loads(res[start:end])
+                llm_res = json.loads(res[start:end])
+                if "date" in local_res:
+                    llm_res["date"] = local_res["date"]
+                if "duration" in local_res:
+                    llm_res["duration"] = local_res["duration"]
+                return llm_res
         except:
             pass
-        return {}
+        return local_res
 
     @staticmethod
     def extract_weather_info(msg: str) -> dict:
-        """
-        ☁️ 升級版：天氣資訊提取器
-        同時抓取「地點」與「日期 (YYYY-MM-DD)」。
-        """
-        # 取得今天的日期，讓 AI 有參考座標
         today = datetime.datetime.now().strftime("%Y-%m-%d")
-        
         prompt = (
             f"Extract City and Date from user input.\n"
             f"Current Date: {today}\n"
@@ -311,16 +350,17 @@ class Tools:
             f"   - '明天' -> Calculate based on Current Date.\n"
             f"   - '今天', '現在', 'Now' -> Return 'today'.\n"
             f"   - If no date is mentioned -> Return 'today'.\n"
-            f"3. Output JSON: {{ \"city\": \"...\", \"date\": \"...\" }}\n"
+            f'3. Output JSON: {{ "city": "...", "date": "..." }}\n'
             f"JSON:"
         )
         res = Tools._call_block(prompt).strip()
         try:
-            start = res.find('{')
-            end = res.rfind('}') + 1
+            start = res.find("{")
+            end = res.rfind("}") + 1
             if start != -1 and end != -1:
                 return json.loads(res[start:end])
-        except: pass
+        except:
+            pass
         return {"city": None, "date": "today"}
 
     @staticmethod
@@ -328,42 +368,30 @@ class Tools:
         try:
             headers = {"User-Agent": "Mozilla/5.0"}
 
-            # 1. 查座標 (這段沒變)
             geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&format=json"
             geo = requests.get(geo_url, headers=headers, timeout=5).json()
-            if "results" not in geo: return f"找不到 '{city}'"
+            if "results" not in geo:
+                return f"找不到 '{city}'"
             loc = geo["results"][0]
             lat, lng = loc["latitude"], loc["longitude"]
 
-            # ==========================================
-            # 📅 日期檢查防呆 (新增的部分！)
-            # ==========================================
             if target_date != "today":
                 try:
-                    # 把文字日期 (2026-01-02) 轉成電腦時間物件
-                    target_dt = datetime.datetime.strptime(target_date, "%Y-%m-%d").date()
+                    target_dt = datetime.datetime.strptime(
+                        target_date, "%Y-%m-%d"
+                    ).date()
                     today_dt = datetime.datetime.now().date()
-                    
-                    # 計算差距天數
                     delta_days = (target_dt - today_dt).days
 
-                    # 防呆 1: 查過去
                     if delta_days < 0:
-                        return f"❌ 無法查詢過去的天氣 ({target_date})，時光機尚未發明。"
-                    
-                    # 防呆 2: 查太遠 (Open-Meteo 免費版限制約 14-16 天)
+                        return (
+                            f"❌ 無法查詢過去的天氣 ({target_date})，時光機尚未發明。"
+                        )
                     if delta_days > 14:
                         return f"❌ 預報太遠了 ({target_date})！我只能查詢未來 14 天內的天氣。"
-                
                 except ValueError:
-                    # 如果日期格式怪怪的，就當作沒事繼續試試看
                     pass
 
-            # ==========================================
-            # 🌤️ 查詢邏輯 (保持原本架構)
-            # ==========================================
-            
-            # 情況 A: 查現在/今天
             if target_date == "today":
                 weather_url = (
                     f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lng}&"
@@ -372,7 +400,7 @@ class Tools:
                 )
                 data = requests.get(weather_url, headers=headers, timeout=5).json()
                 current = data.get("current", {})
-                
+
                 temp = current.get("temperature_2m", "N/A")
                 feel = current.get("apparent_temperature", "N/A")
                 humid = current.get("relative_humidity_2m", "N/A")
@@ -385,8 +413,6 @@ class Tools:
                     f"🌡️ 氣溫: {temp}°C (體感 {feel}°C)\n"
                     f"💧 濕度: {humid}%\n"
                 )
-
-            # 情況 B: 查特定日期
             else:
                 weather_url = (
                     f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lng}&"
@@ -395,8 +421,6 @@ class Tools:
                     f"timezone=auto"
                 )
                 data = requests.get(weather_url, headers=headers, timeout=5).json()
-                
-                # 這裡也要防呆：如果 API 沒回傳 daily 資料，代表真的查不到
                 if "daily" not in data or not data["daily"]["time"]:
                     return f"❌ 氣象局資料庫沒有 {target_date} 的資料。"
 
@@ -416,31 +440,40 @@ class Tools:
 
         except Exception as e:
             return f"查詢失敗: {e}"
-    
+
     @staticmethod
     def _get_weather_status(code: int) -> str:
-        """小幫手：把數字轉文字"""
-        if code == 0: return "晴朗 ☀️"
-        if 1 <= code <= 3: return "多雲 ☁️"
-        if code in [45, 48]: return "有霧 🌫️"
-        if 51 <= code <= 67: return "下雨 🌧️"
-        if 71 <= code <= 77: return "下雪 ❄️"
-        if 80 <= code <= 82: return "陣雨 🌦️"
-        if code >= 95: return "雷雨 ⛈️"
+        if code == 0:
+            return "晴朗 ☀️"
+        if 1 <= code <= 3:
+            return "多雲 ☁️"
+        if code in [45, 48]:
+            return "有霧 🌫️"
+        if 51 <= code <= 67:
+            return "下雨 🌧️"
+        if 71 <= code <= 77:
+            return "下雪 ❄️"
+        if 80 <= code <= 82:
+            return "陣雨 🌦️"
+        if code >= 95:
+            return "雷雨 ⛈️"
         return "未知"
 
+
 # ==========================================
-# 🗺️ 旅遊 FSM (維持高效能平行 + 心跳)
+# 🗺️ 旅遊 FSM (維持高效能平行 + 心跳 + 多天數)
 # ==========================================
 class ZoneTravel(StateMachine):
     idle = State("idle", value="idle", initial=True)
     collecting_dest = State("collecting_dest", value="collecting_dest")
     collecting_date = State("collecting_date", value="collecting_date")
+    collecting_duration = State("collecting_duration", value="collecting_duration")
     processing = State("processing", value="processing")
 
     start_plan = idle.to(collecting_dest)
     got_dest = collecting_dest.to(collecting_date)
-    got_date = collecting_date.to(processing)
+    got_date = collecting_date.to(collecting_duration)
+    got_duration = collecting_duration.to(processing)
     finish = processing.to(idle)
 
     def safe_reset(self):
@@ -448,7 +481,7 @@ class ZoneTravel(StateMachine):
             self.current_state = self.idle
 
     def __init__(self):
-        self.trip_data = {"dest": None, "date": None}
+        self.trip_data = {"dest": None, "date": None, "duration": None}
         super().__init__()
 
     def on_enter_collecting_dest(self):
@@ -458,39 +491,81 @@ class ZoneTravel(StateMachine):
         dest = self.trip_data["dest"]
         yield f"✅ 目的地：{dest}。請問 **什麼時候** 出發？"
 
+    def on_enter_collecting_duration(self):
+        date = self.trip_data["date"]
+        yield f"✅ 出發日期：{date}。請問 **要玩幾天**？"
+
     def on_enter_processing(self):
         dest = self.trip_data["dest"]
-        date = self.trip_data["date"]
-        yield f"✅ 日期：{date}\n🚀 正在**平行運算**為您規劃 {dest} 的行程...\n"
+        start_date_str = self.trip_data["date"]
 
-        p1 = f"請只規劃 {date} 去 {dest} 的『上午』行程。簡單推薦1-2個景點與特色早餐。請用繁體中文。"
-        p2 = f"請只規劃 {date} 去 {dest} 的『午餐與下午』行程。推薦特色午餐與午後景點。請用繁體中文。"
-        p3 = f"請只規劃 {date} 去 {dest} 的『晚餐與晚上』行程。推薦夜市或夜景。請用繁體中文。"
+        try:
+            total_days = int(self.trip_data.get("duration", 1))
+            if total_days < 1:
+                total_days = 1
+        except:
+            total_days = 1
+
+        yield f"🚀 正在為您規劃 {dest} 的 {total_days} 天行程 (正在確認每日天氣...)\n"
 
         def wait_with_heartbeat(future):
             while not future.done():
                 time.sleep(0.5)
-                yield " ."  # 心跳機制：每 0.5 秒發送訊號防止斷線
+                yield " ."
             yield "\n"
-            yield future.result()
+            try:
+                yield future.result()
+            except Exception as e:
+                yield f"⚠️ 生成失敗: {e}"
 
-        # 🔥 因為現在有 3 個 Key，剛好對應這裡的 3 個 Workers
-        # 每個執行緒都會分配到一個獨立的 Key，效率最大化！
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            f1 = executor.submit(Tools._call_block, p1)
-            f2 = executor.submit(Tools._call_block, p2)
-            f3 = executor.submit(Tools._call_block, p3)
+        current_date = None
+        try:
+            current_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d")
+        except:
+            pass
 
-            yield "\n### 🌅 上午行程\n"
-            yield from wait_with_heartbeat(f1)
+        for day_i in range(1, total_days + 1):
 
-            yield "\n\n### ☀️ 下午行程\n"
-            yield from wait_with_heartbeat(f2)
+            day_label = f"第 {day_i} 天"
+            target_date_str = start_date_str
 
-            yield "\n\n### 🌙 晚上行程\n"
-            yield from wait_with_heartbeat(f3)
+            if current_date:
+                target_dt = current_date + datetime.timedelta(days=day_i - 1)
+                target_date_str = target_dt.strftime("%Y-%m-%d")
+                day_label += f" ({target_date_str})"
+            elif day_i == 1:
+                day_label += f" ({start_date_str})"
 
-        yield "\n\n🎉 規劃完成！祝您旅途愉快！"
+            # 🔥 自動天氣查詢
+            weather_note = ""
+            try:
+                w_report = Tools.get_weather(dest, target_date_str)
+                if "概況" in w_report:
+                    weather_note = f"(注意：當天氣象預報顯示為『{w_report}』，請根據天氣狀況調整行程，例如雨天安排室內活動)"
+            except:
+                pass
+
+            yield f"\n\n## 🗓️ {day_label} 行程規劃\n"
+
+            p1 = f"請規劃 {dest} {day_label} 的『上午』行程。簡單推薦1-2個景點與特色早餐。請用繁體中文。{weather_note}"
+            p2 = f"請規劃 {dest} {day_label} 的『午餐與下午』行程。推薦特色午餐與午後景點。請用繁體中文。{weather_note}"
+            p3 = f"請規劃 {dest} {day_label} 的『晚餐與晚上』行程。推薦夜市或夜景。請用繁體中文。{weather_note}"
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                f1 = executor.submit(Tools._call_block, p1)
+                f2 = executor.submit(Tools._call_block, p2)
+                f3 = executor.submit(Tools._call_block, p3)
+
+                yield f"### 🌅 {day_label} 上午"
+                yield from wait_with_heartbeat(f1)
+
+                yield f"\n### ☀️ {day_label} 下午"
+                yield from wait_with_heartbeat(f2)
+
+                yield f"\n### 🌙 {day_label} 晚上"
+                yield from wait_with_heartbeat(f3)
+
+        yield "\n\n🎉 所有行程規劃完成！祝您旅途愉快！"
 
 
 # ==========================================
@@ -513,8 +588,8 @@ class Pipe:
             yield "Wait...\n\n"
             yield "🤔 正在讀取訊息...\n"
 
-            intent_type = Tools.analyze_intent_only(msg)
             fsm = ZoneTravel()
+            saved_state_found = False
 
             if user_id in GLOBAL_USER_STATES:
                 saved = GLOBAL_USER_STATES[user_id]
@@ -522,12 +597,18 @@ class Pipe:
                 for s in fsm.states:
                     if s.name == saved["state"]:
                         fsm.current_state = s
+                        saved_state_found = True
                         break
 
             is_travel_active = fsm.current_state != fsm.idle
-            is_new_travel = intent_type == "TRAVEL"
 
-            if is_travel_active or is_new_travel:
+            if is_travel_active:
+                intent_type = "TRAVEL"
+                yield "⚡ (檢測到對話進行中，加速處理...)\n"
+            else:
+                intent_type = Tools.analyze_intent_only(msg)
+
+            if is_travel_active or intent_type == "TRAVEL":
                 if msg.lower() in ["取消", "退出", "reset"]:
                     fsm.safe_reset()
                     if user_id in GLOBAL_USER_STATES:
@@ -535,16 +616,33 @@ class Pipe:
                     yield "🛑 已重置。"
                     return
 
-                if is_new_travel and not is_travel_active:
+                if not is_travel_active:
                     fsm.start_plan()
 
-                yield "🔍 分析旅遊資訊中...\n"
+                # 🔥 本地解析狀態顯示
+                is_local_success = False
+                local_res = Tools.try_local_parse(msg)
+
+                if fsm.current_state == fsm.collecting_date and local_res.get("date"):
+                    is_local_success = True
+                    yield "⚡ (光速本地解析成功)\n"
+                elif fsm.current_state == fsm.collecting_duration and local_res.get(
+                    "duration"
+                ):
+                    is_local_success = True
+                    yield "⚡ (光速本地解析成功)\n"
+
+                if not is_local_success:
+                    yield "🔍 分析旅遊資訊中...\n"
+
                 extracted = Tools.extract_travel_info(msg, fsm.trip_data)
 
                 if extracted.get("dest"):
                     fsm.trip_data["dest"] = extracted["dest"]
                 if extracted.get("date"):
                     fsm.trip_data["date"] = extracted["date"]
+                if extracted.get("duration") is not None:
+                    fsm.trip_data["duration"] = extracted["duration"]
 
                 if not fsm.trip_data["dest"]:
                     fsm.current_state = fsm.collecting_dest
@@ -563,6 +661,15 @@ class Pipe:
                     dest = fsm.trip_data["dest"]
                     yield f"✅ 目的地：**{dest}**。\n請問 **什麼時候** 出發？"
 
+                elif fsm.trip_data["duration"] is None:
+                    fsm.current_state = fsm.collecting_duration
+                    GLOBAL_USER_STATES[user_id] = {
+                        "state": "collecting_duration",
+                        "data": fsm.trip_data,
+                    }
+                    date = fsm.trip_data["date"]
+                    yield f"✅ 出發日期：**{date}**。\n請問這次旅行要安排 **幾天**？"
+
                 else:
                     fsm.current_state = fsm.processing
                     yield from fsm.on_enter_processing()
@@ -571,21 +678,15 @@ class Pipe:
                         del GLOBAL_USER_STATES[user_id]
                 return
 
-            # 處理天氣
             if intent_type == "WEATHER":
                 yield "☁️ 分析天氣需求中...\n"
-                
-                # 1. 呼叫新的提取器 (抓地點 + 日期)
                 info = Tools.extract_weather_info(msg)
                 city = info.get("city")
                 date = info.get("date")
 
                 if city and city != "None":
-                    # 顯示一點提示訊息，讓使用者知道我們有聽懂日期
                     date_display = "現在" if date == "today" else date
                     yield f"🔍 正在查詢 **{city}** - **{date_display}** 的天氣...\n"
-                    
-                    # 2. 呼叫新的查詢函式
                     report = Tools.get_weather(city, date)
                     yield report
                 else:
