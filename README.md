@@ -15,27 +15,55 @@ docker-compose down
 
 # **流程圖**
 ```mermaid 
-graph TD
-    %% 定義樣式
-    classDef start fill:#f9f,stroke:#333,stroke-width:2px;
-    classDef router fill:#bbf,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5;
-    classDef process fill:#dfd,stroke:#333,stroke-width:2px;
-    classDef fsm fill:#ffe6cc,stroke:#d79b00,stroke-width:2px;
-    classDef api fill:#e1d5e7,stroke:#9673a6,stroke-width:2px;
+%%{
+  init: {
+    'theme': 'base',
+    'themeVariables': {
+      'primaryColor': '#2d2d2d',
+      'primaryTextColor': '#fff',
+      'primaryBorderColor': '#fff',
+      'lineColor': '#38bdf8',
+      'secondaryColor': '#006100',
+      'tertiaryColor': '#fff'
+    }
+  }
+}%%
 
+graph TD
+    %% ==========================================
+    %% 🎨 樣式定義區 (高對比配色)
+    %% ==========================================
+    %% start: 起點 - 亮粉紅邊框 + 白字
+    classDef start fill:#331133,stroke:#ff79c6,stroke-width:3px,color:#fff;
+    
+    %% router: 判斷點 - 亮藍虛線 + 白字
+    classDef router fill:#0d1117,stroke:#38bdf8,stroke-width:2px,stroke-dasharray: 5 5,color:#fff;
+    
+    %% process: 一般處理 - 深灰底 + 亮綠邊框 + 白字
+    classDef process fill:#161b22,stroke:#50fa7b,stroke-width:2px,color:#fff;
+    
+    %% fsm: 狀態機 - 深橘底 + 亮橘邊框 + 白字
+    classDef fsm fill:#2a1a00,stroke:#ffb86c,stroke-width:2px,color:#fff;
+    
+    %% api: 外部呼叫/LLM - 深紫底 + 亮紫邊框 + 白字
+    classDef api fill:#1a0f2e,stroke:#bd93f9,stroke-width:2px,color:#fff;
+
+    %% ==========================================
+    %% 🔗 流程邏輯區 (完全不用動)
+    %% ==========================================
     User([使用者輸入]) --> Pipe[Pipe.pipe]:::start
     Pipe --> Analyze[Tools.analyze_intent_only]:::router
     
-    %% 意圖判斷分支
     Analyze -->|TRAVEL| CheckState{是否有未完成<br>旅遊狀態?}:::fsm
     Analyze -->|WEATHER| WeatherProc[天氣處理]:::process
     Analyze -->|MEMORY_SAVE| MemSave[ZoneMemory.handle 'SAVE']:::process
     Analyze -->|MEMORY_QUERY| MemQuery[ZoneMemory.handle 'QUERY']:::process
     Analyze -->|TRASH / OTHER| GeneralChat[一般閒聊]:::process
 
-    %% 旅遊 FSM 邏輯
     subgraph Travel_FSM [旅遊狀態機 ZoneTravel]
         direction TB
+        style Travel_FSM fill:#161b22,stroke:#ffb86c,stroke-width:2px,color:#fff
+        
         CheckState -- No --> StartPlan[FSM: start_plan]
         CheckState -- Yes --> RestoreState[恢復狀態: collecting_dest/date]
         
@@ -60,8 +88,8 @@ graph TD
         Combine --> Finish[FSM: finish / 重置]
     end
 
-    %% 天氣處理邏輯
     subgraph Weather_System [天氣系統]
+        style Weather_System fill:#161b22,stroke:#50fa7b,stroke-width:2px,color:#fff
         WeatherProc --> ExtractWeather[提取城市 & 日期]
         ExtractWeather --> CheckDate{檢查日期}
         CheckDate -- "是今天 (today)" --> API_Current[Open-Meteo Current API]:::api
@@ -69,19 +97,17 @@ graph TD
         API_Current & API_Daily --> WeatherReport[回傳天氣報告]
     end
 
-    %% 記憶系統邏輯
     subgraph Memory_System [記憶系統]
+        style Memory_System fill:#161b22,stroke:#50fa7b,stroke-width:2px,color:#fff
         MemSave --> SaveFile[(寫入 JSON)]:::api
         MemQuery --> LoadFile[(讀取 JSON)]:::api
         LoadFile --> LLM_RAG[LLM 生成回答]:::api
     end
 
-    %% 一般閒聊
     GeneralChat --> LLM_Chat[LLM 一般對話]:::api
 
-    %% 輸出
     AskDest & AskDate & Finish & WeatherReport & SaveFile & LLM_RAG & LLM_Chat --> Response([回傳給使用者])
+    style Response fill:#331133,stroke:#ff79c6,stroke-width:3px,color:#fff
 
-    %% Key Manager 說明 (註解)
     KeyManager[KeyManager: 三 Key 輪詢] -.->|提供 Headers| PlanMorning & PlanAfternoon & PlanNight & LLM_Chat & LLM_RAG
-    style KeyManager fill:#fff,stroke:#333,stroke-dasharray: 5 5
+    style KeyManager fill:#000,stroke:#fff,stroke-dasharray: 5 5,color:#fff
