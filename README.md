@@ -75,6 +75,17 @@ ngrok http 3000
   🧠記憶系統<br>
   🗺️旅遊規劃<br>
 
+## 📂 檔案結構
+```
+.
+├── toc_agent.py          # 主程式 (包含 Pipe, FSM, Tools, KeyManager)
+├── toc_memory.json       # (自動生成) 儲存使用者記憶的 JSON 檔案
+└── requirements.txt      # 專案依賴套件列表
+```
+
+## 功能特色
+  🔑 三組API Key輪詢
+    * 自動在 3 組 API Key 之間切換，大幅降低 ```Too Many Requests``` 的風險
 # **流程圖**
 ```mermaid 
 %%{
