@@ -9,7 +9,7 @@ description = "Optimized with 3 API Keys for perfect parallel processing & Finit
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-  { name = "NCKU Student & Gemini" }
+  { name = "huang940822 & F74121199NCKU" }
 ]
 keywords = ["agent", "fsm", "ncku", "llm", "openwebui"]
 
