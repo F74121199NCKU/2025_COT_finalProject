@@ -311,24 +311,58 @@ class Tools:
     @staticmethod
     def get_weather(city: str) -> str:
         try:
-            #爬蟲抓取資訊
             headers = {"User-Agent": "Mozilla/5.0"}
-            geo = requests.get(
-                f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&format=json",
-                headers = headers,
-                timeout = 10,
-            ).json()
+            
+            # 1. 查座標 (這段沒變)
+            geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&format=json"
+            geo = requests.get(geo_url, headers=headers, timeout=10).json()
+            
             if "results" not in geo:
                 return f"找不到 '{city}'"
+            
             loc = geo["results"][0]
-            w = requests.get(
-                f"https://api.open-meteo.com/v1/forecast?latitude={loc['latitude']}&longitude={loc['longitude']}&current_weather=true",
-                headers = headers,
-                timeout = 10,
-            ).json()
-            return f"📍 {loc['name']}: {w['current_weather']['temperature']}°C"
-        except:
-            return "天氣查詢失敗"
+            lat = loc['latitude']
+            lng = loc['longitude']
+
+            # 2. 查詳細天氣 (🔥 這裡改了！我們多要了很多資料)
+            # current 參數指定了我們要：氣溫、相對濕度、體感溫度、天氣代碼、風速
+            weather_url = (
+                f"https://api.open-meteo.com/v1/forecast?"
+                f"latitude={lat}&longitude={lng}&"
+                f"current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&"
+                f"timezone=auto"
+            )
+            w = requests.get(weather_url, headers=headers, timeout=10).json()
+            
+            # 3. 解析資料
+            current = w.get("current", {})
+            temp = current.get("temperature_2m", "N/A")          # 氣溫
+            feel = current.get("apparent_temperature", "N/A")    # 體感
+            humid = current.get("relative_humidity_2m", "N/A")   # 濕度
+            wind = current.get("wind_speed_10m", "N/A")          # 風速
+            code = current.get("weather_code", 0)                # 天氣代碼 (數字)
+
+            # 4. 翻譯天氣代碼 (把數字變文字)
+            status = "晴朗 ☀️"
+            if 1 <= code <= 3: status = "多雲 ☁️"
+            elif code in [45, 48]: status = "有霧 🌫️"
+            elif 51 <= code <= 67: status = "下雨 🌧️"
+            elif 71 <= code <= 77: status = "下雪 ❄️"
+            elif 80 <= code <= 82: status = "陣雨 🌦️"
+            elif code >= 95: status = "雷雨 ⛈️"
+
+            # 5. 組裝漂亮的回報單
+            report = (
+                f"📍 **{loc['name']} 天氣報告**\n"
+                f"☁️ 概況: {status}\n"
+                f"🌡️ 氣溫: {temp}°C (體感 {feel}°C)\n"
+                f"💧 濕度: {humid}%\n"
+                f"💨 風速: {wind} km/h"
+            )
+            return report
+
+        except Exception as e:
+            return f"天氣查詢失敗: {e}"
 
 
 # 旅遊 FSM
