@@ -62,6 +62,10 @@ ngrok http 3000
 ---
 
 # TOC_FinalProject_TravelAssistant✈️
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
+![Backend](https://img.shields.io/badge/NCKU-API_Gateway-green)
+![Memory](https://img.shields.io/badge/Memory-System_Active-purple?logo=obsidian&logoColor=white)
+![Core](https://img.shields.io/badge/FSM-State_Machine-FF4B4B)
 
 
 # **流程圖**
