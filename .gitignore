@@ -9,3 +9,5 @@ venv/
 docker-compose.yaml
 memory.json
 toc_agent/
+test.py
+
