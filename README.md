@@ -84,7 +84,7 @@ ngrok http 3000
 ```
 
 ## 功能特色
-  🔑 三組API Key輪詢<br>
+  - 🔑 三組API Key輪詢<br>
     - 自動在 3 組 API Key 之間切換，大幅降低 ```Too Many Requests``` 的風險
 # **流程圖**
 ```mermaid 
